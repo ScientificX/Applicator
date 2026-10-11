@@ -1,16 +1,30 @@
-# job-agent - Workday Channel Plan (v4)
+# job-agent - Workstream W: Workday Channel (v4.1)
 
-> **Scope: this is the Workday channel deep-dive, not the whole system.** The umbrella plan for the
-> generalised multi-channel agent (hunt -> rank -> tailor -> route -> execute -> track -> learn) is
-> [`plan-general.md`](plan-general.md). This file is the reference implementation of the
-> web-form/ATS channel plus the `cxs` tenant-discovery mechanism.
-
-Autonomous Workday application agent: hybrid `cxs` API discovery + persistent-identity browser apply + Cloudflare mail-worker onboarding.
+**Doc set `PS-5.4`.** This is the **implementation doc for the Workday channel**, not a program.
+Start at [`plan-general.md`](plan-general.md) (or [`README.md`](README.md)); this file is entered only
+at the gates below.
 
 - **Project root:** `/home/favou/development/job-agent` (repo root; sibling of `my-email-worker`)
-- **Status:** design closed. `[V]` = verified empirically during planning. `[?]` = still to verify (needs HAR).
+- **Owns:** `cxs` endpoints + oracle, shard/site discovery, the Workday apply state machine + selectors, Workday account onboarding, HAR fixtures
+- **Defers to `plan-general.md` for:** criteria + visa (2.1-2.2), channels (3), sources/hunt (4), tailoring (5), LLM layer (1.5), email identity + attribution (6), identity/proxy policy (8), data model (10), milestones (11)
+- **Status:** design closed. `[V]` = verified empirically. `[?]` = to verify, tracked in `plan-general.md` section 14.
 - **Stack:** Python 3.13 (`uv`) - Patchright - curl_cffi - Ollama (local) - DeepSeek `deepseek-flash` (cloud)
 
+## Entry, exit and code map (the seam)
+
+| Gate | Enters at | Preconditions | Deliverable |
+|---|---|---|---|
+| **H1a** discovery | `G1` | general `DiscoverySource` protocol; `postings`/`companies`/`tenant_probes`/`shards` migrations; `curl_cffi` wrapper | `G1-W1` `WorkdayCxsDiscovery`, `G1-W2` `WorkdayTenantDiscovery` |
+| **H1b** apply | `G5` | G3 proven on a non-Workday channel; attribution working on real mail incl. a Workday ack; address model live; per-identity proxies; **HAR captured**; `doctor` green; budget caps | `G5-W1..W3` `WorkdayWebApply` + onboarding |
+| **H2** return | `G4`/`G6` | - | metrics, drift signatures and fixtures back into `plan-general.md` sections 2, 12, 1 |
+
+| Interface (owned by general) | Implemented / consumed here |
+|---|---|
+| `DiscoverySource` | `src/jobagent/discover/workday_cxs.py` |
+| `TenantSource` | `src/jobagent/discover/workday_tenants.py` |
+| `ApplyChannel` | `src/jobagent/apply/workday.py` |
+| `Mailbox` (consumed) | `src/jobagent/apply/onboard.py` |
+| answer cache (consumed) | `src/jobagent/apply/questions.py` |
 ## 0. Locked decisions
 
 | Topic | Decision |
@@ -19,15 +33,12 @@ Autonomous Workday application agent: hybrid `cxs` API discovery + persistent-id
 | Job discovery | `cxs` `searchText` + `appliedFacets` server-side narrowing, 20/page |
 | Apply | Patchright, **persistent context per identity**, `data-automation-id` selectors, upload-first ("Autofill with Resume") |
 | Identities | **Multiple per tenant**, config-capped. 1 alias + 1 profile dir + 1 sticky proxy each |
-| Aliases | `wd-<tenant>-<nn>@toesk.uk`, distinct local parts, **never `+`-tagged** |
-| Resume | master `profile.json` -> select-and-patch -> Jinja2 -> `page.pdf()` -> pdfplumber ATS gate |
+| Account addresses | `wd-<tenant>-<nn>@toesk.uk`, distinct local parts, **never `+`-tagged**, **never used for attribution** (`plan-general.md` 6.1) |
+| Resume | owned by **`plan-general.md` 5**; Workday-specific parser requirements in section 9 |
 | Submit policy | **`park` by default**; `--auto-submit` opt-in |
-| LLM | `deepseek-flash` primary - local `qwen3:14b`/`qwen3:8b` for classification + failover - Ollama `bge-m3` embeddings |
+| LLM | see **`plan-general.md` 1.5** (tiers + budget); Workday-specific notes in section 10 |
 | Local GPU | RTX 5060 Ti 16 GB (sm_120 -> needs CUDA 12.8+): **Ollama-only** for GPU work |
-| Target profile | mid-senior, AVP-ish, Java/backend, banking/fintech |
-| Locations | Dublin (tier 1) > London (tier 2) > remote (tier 3) |
-| Visa | Ireland: right to work. **Everywhere else: sponsorship required** |
-| Comp floor | IE EUR 70k - UK GBP 75k - remote EUR 70k (confirmed) |
+| Criteria, visa, comp | **`plan-general.md` 2.1-2.2** (system-wide). Workday-specific notes only in section 3 |
 | Key rotation | **Not now** (user decision); rotate DeepSeek + `AGENT_TOKEN` after wiring |
 | Proxies | Per-identity sticky creds **to be supplied** -> until then `tenant_concurrency_cap = 1` |
 
@@ -67,59 +78,27 @@ Discover Workday tenants -> discover matching reqs -> rank -> tailor one resume 
 | Park rate | < 10%, never blocks other tenants |
 | Tenant discovery | >= 20 live tenants, >= 80% correct site slugs, **zero manual entries** |
 
-## 3. Target profile - `config/criteria.yaml`
+## 3. Criteria, visa and targeting
 
-```yaml
-target:
-  seniority: [mid, senior]                       # "AVP-ish" IC
-  title_include: ['\bAVP\b','Assistant Vice President','Senior Software Engineer',
-                  'Backend Engineer','Java Engineer','Software Engineer (III|IV)','Lead Engineer']
-  title_exclude: ['Intern','Graduate','Analyst','Associate','Principal','Director','\bVP\b','Manager']
-  stack_must: ['Java','Spring','microservices','REST','SQL']
-  stack_nice: ['Kafka','Kubernetes','Docker','AWS','Azure','GCP','Terraform','low.?latency',
-               'distributed','JUnit','Mockito','CI/CD','observability']
-  domain_nice: ['bank','financial services','payments','trading','fintech','capital markets']
-  locations:
-    preferred: ['Dublin','Ireland']                   # tier 1
-    next:      ['London','United Kingdom']            # tier 2
-    also:      ['Remote','EMEA Remote','EU Remote']   # tier 3
-  comp: { IE_min_eur: 70000, UK_min_gbp: 75000, remote_min_eur: 70000 }
-  top_k_per_run: 25
-```
+**Moved to `plan-general.md` sections 2.1-2.2** (system-wide, not channel-specific): the target
+profile (`config/criteria.yaml`) and the visa / right-to-work config (`config/visa.yaml`, enforced by
+`match/visa.py`). Workday-specific notes only:
 
-## 4. Visa / right-to-work - `config/visa.yaml`, enforced by `match/visa.py`
+- The `cxs` search endpoint accepts `searchText` and `appliedFacets`; the criteria feed both (section 7).
+- Location tiers matter more here than on other channels: Workday tenants skew to large employers with Dublin/London offices, so the tier-1 filter does most of the work.
+- Country for visa answers is derived from the posting location; Workday `locationsText` is the usual source.
 
-```yaml
-visa:
-  right_to_work: { IE: none, default: sponsorship_required }
-  jd_filter:
-    exclude_if: ['no sponsorship','unable to sponsor','must already have the right to work',
-                 'we do not (provide|offer) visa','no visa sponsorship']
-    boost_if:   ['visa sponsorship (is )?available','we (do )?sponsor','sponsorship provided',
-                 'relocation support']
-  answers:                       # country-scoped; seeded into the answer cache pre-LLM
-    IE:      { require_sponsorship: 'No',  right_to_work: 'Yes' }
-    GB:      { require_sponsorship: 'Yes', right_to_work: 'No' }
-    default: { require_sponsorship: 'Yes' }
-```
+## 5. Workday slice of the pipeline
 
-Country is inferred from job location/tenant, so IE and UK answers can never cross-contaminate. Ranking penalty for `exclude_if`, boost for `boost_if`. `matches` stores `visa_decision` for auditability.
+The program pipeline (hunt -> rank -> tailor -> route -> execute -> track -> learn) is defined in
+`plan-general.md` section 2. This workstream implements exactly two slices of it:
 
-## 5. Architecture
+- **hunt** (G1): `cxs` search + facets -> normalized postings; tenant discovery through the oracle.
+- **execute** (G5): deep-link -> autofill-with-resume -> a11y diff -> Q&A cache -> review -> submit | park.
 
-```
-tenants discover  <- inverted: aggregators -> Workday apply-URLs   (+ pluggable breadth)
-   |
-jobs discover     <- cxs searchText + appliedFacets (server-side narrow, 20/page)
-   |
-match             <- dedupe -> hard filters -> visa filter -> BM25 + embeddings -> top-K
-   |
-tailor            <- JD->requirements (cached) -> bullet select -> 1 rewrite -> validate -> PDF -> ATS gate
-   |
-apply             <- deep-link -> autofill-with-resume -> a11y diff -> Q&A cache -> review -> submit | park
-```
+The stage-split scheduler (Ollama-hot batches, then browsers-hot with `OLLAMA_KEEP_ALIVE=0`) is defined
+in `plan-general.md`; this channel is a consumer of it, not an owner.
 
-**Stage-split scheduler** (VRAM/RAM guard): `discover/match/tailor` in an Ollama-hot batch, then `apply` browsers-hot with Ollama unloaded (`OLLAMA_KEEP_ALIVE=0`). Stage-based, not per-job - deliberately.
 
 ## 6. Tenant discovery (`discover/`)
 
@@ -158,60 +137,41 @@ POST {base}/jobs {"appliedFacets":{"jobFamilyGroup":["0c40f6bd..."]},
 
 Cuts per-tenant cost from ~100 pages to 1-3. `bulletFields[0]` = `JR...` req id -> dedupe key with `externalPath`. Filter `canApply`. Incremental via `last_seen` watermark + `total`/facet drift.
 
-## 8. Matching (`match/`)
+## 8. Matching (Workday notes)
 
-1. Dedupe on `(tenant, job_posting_id)`; cross-channel dedupe on `(company, normalized_title, location)` for the route-around-Workday branch.
-2. Hard filters: title include/exclude, `stack_must` present, location tier, comp floor, blacklists.
-3. **Visa filter** (section 4).
-4. Rank: `0.6*cosine(embeddings) + 0.4*BM25` over title + bulletFields + first 2 kB of JD.
-5. Emit top-K with a human-readable `reason`. Below-cut jobs are stored but never reach the LLM.
+Ranking, visa filtering and dedupe are **owned by `plan-general.md` sections 4 and 10**. Workday-specific inputs to that layer:
 
-## 9. Tailoring (`tailor/`)
+- `bulletFields[0]` gives the `JR...` requisition id -> the strongest dedupe key available, alongside `externalPath`.
+- `facets` from the same search response give per-location and per-`jobFamilyGroup` counts, so the hunt layer can size a tenant without paging through it.
+- Filter on `canApply`: the 200 response includes postings that are not open to external applicants.
 
-`profile.json` holds **atomic, tagged, metric-bearing bullets**. Per job (<=2 LLM calls):
 
-1. `jd.py` -> structured requirements + `keywords_verbatim`; cached by `jd_hash`.
-2. `select.py` -> hybrid retrieval of bullets; constraints: <=6/role, <=2 pages, chronology preserved, >=1 metric-bearing bullet per role.
-3. `rewrite.py` -> **one** call: new summary + rewrite only the <=K bullets missing JD keywords. Prefix-cache friendly (profile first, JD last).
-4. `validate.py` -> every number must exist in the source bullet; every proper noun must exist in the master profile; page count; hard-skill coverage. Fail -> deterministic fallback to un-rewritten bullets.
-5. `render.py` -> Jinja2 -> HTML -> `page.pdf()` (single column, standard headings, selectable text). Optional DOCX A/B.
-6. **ATS gate** -> `pdfplumber` must extract name, each company/title, and dates in order; else re-render with the fallback template. *(A pretty PDF that parses badly costs 40 manual corrections - this gate matters more than prompt tuning.)*
-7. Cache by `(profile_version, jd_hash, template_version)`.
+## 9. Tailoring
 
-## 10. LLM layer (`llm/`)
+**Owned by `plan-general.md` section 5** (master profile, permitted operations, the five anti-exaggeration gates, the ATS extraction gate, `tailor_report.json`). Workday-specific requirements:
 
-| Role | Model | Why |
-|---|---|---|
-| JD->requirements, resume rewrite | `deepseek-flash` (`effort: low` for extraction) | verified JSON mode, 0.71 s, 1M ctx, cache counters |
-| Hard cases only | `deepseek-v4-pro` | text-only escalation |
-| **Vision fallback** for unknown Workday fields | `deepseek-flash` (image input) | replaces a separate vision-model seam |
-| Classification, question normalisation, answer-cache misses | local `qwen3:14b` / `qwen3:8b` | thousands of tiny calls; free, no rate limit |
-| Offline prompt/schema iteration + tests | local | zero API cost, CI-safe |
-| Failover on 429/outage | local `qwen3:14b` | keeps runs alive |
-| Embeddings | Ollama `bge-m3` (fallback `nomic-embed-text`, or `fastembed` CPU) | sm_120 makes Python CUDA wheels fragile; Ollama ships a compatible runtime |
+- Workday parses the uploaded file itself, so the ATS extraction gate matters more here than on any other channel - a badly parsed PDF becomes dozens of manual field corrections at `G5-W2`.
+- Single column, standard headings, selectable text; DOCX stays an A/B option if the Workday parser handles it better.
 
-Wiring is config, not code (Ollama speaks OpenAI at `/v1`):
 
-```yaml
-llm:
-  primary:  { provider: deepseek,          base_url: https://api.deepseek.com, model: deepseek-flash }
-  escalate: { provider: deepseek,          base_url: https://api.deepseek.com, model: deepseek-v4-pro }
-  classify: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: qwen3:14b }
-  failover: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: qwen3:8b }
-embeddings: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: bge-m3 }
-budget: { max_cost_per_run_usd: 1.00, max_cost_per_day_usd: 3.00 }   # balance is $7.54
-```
+## 10. LLM layer
 
-`cost.py` reads `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `cached_tokens`. pydantic-validate every structured output: one retry, then deterministic fallback.
+**Owned by `plan-general.md` section 1.5** (tiers, wiring, budget caps). Workday-specific notes:
 
-## 11. Identity & mail (`onboard/`, `notify/`)
+- `effort: low` for JD->requirements extraction; the tailoring call stays on `deepseek-flash`.
+- The vision fallback (`deepseek-flash` image input) exists mainly for this channel: unknown Workday fields that neither `data-automation-id` nor label matching resolves get a screenshot.
 
-- Alias `wd-<tenant>-<nn>@toesk.uk`; random 24-char password per identity; `state/secrets.json` (0600).
-- Lifecycle `provisioning -> ready -> cooldown(403/429) -> retired | banned`; `onboard --rotate <tenant>` mints `-02` and requeues that identity's unsubmitted work.
-- Scheduler: capacity-aware LRU (most remaining daily budget), respecting `next_available_at`.
-- Mail API: `/latest` only for newest (`/emails` is lexicographic), URL-encode `recipient`/`key`, **DELETE after read**, `mail_events.message_id UNIQUE`, `drain()` before each flow, reject `receivedAt < flow_start`, `404` = empty, `500` = backoff.
-- **Verification links must be opened inside the same browser context** (else the token lands in the wrong cookie jar). Race: logged-in-state vs verification-screen; "Resend code" once on timeout.
-- Mailbox poller also harvests application-received/outcome mail -> closes the funnel (`funnel.stage = response`).
+
+## 11. Identity & mail (`onboard/`)
+
+Address policy, attribution, mail etiquette and the read-then-DELETE persistence rule are **owned by `plan-general.md` section 6**. Workday-specific:
+
+- Account address `wd-<tenant>-<nn>@toesk.uk` - a Workday account is keyed on the email, so each tenant needs its own; random 24-char password per identity in `state/secrets.json` (0600). Never rotated (it is the login and password-reset path); the contact address on the form is the canonical one.
+- Lifecycle `provisioning -> ready -> cooldown(403/429) -> retired | banned`; `onboard --rotate <tenant>` mints `-02` and requeues that identity unsubmitted work.
+- Scheduler: capacity-aware LRU (most remaining daily budget) respecting `next_available_at`; `tenant_concurrency_cap = 1` until proxies are supplied.
+- **Verification links must be opened inside the same browser context** as the signup (else the token lands in the wrong cookie jar). Race: logged-in-state vs verification-screen; "Resend code" once on timeout.
+- Workday acks land in the general attributer; **tier 1 resolves them even when the subject names only the company** (observed: `Thank you for your interest in Citi!`).
+
 
 ## 12. Apply state machine (`apply/workday.py`)
 
@@ -242,23 +202,36 @@ Provider creds format: `http://user:pass@gate.provider.net:8000` - **one sticky 
 
 **Status: creds pending.** Until supplied, `tenant_concurrency_cap = 1` is enforced and extra identities act as rotation reserve only (extra accounts from one IP add ban surface with no throughput gain).
 
-## 14. Data model (`state/jobagent.db`)
+## 14. Data model
 
-`shards(host_suffix, resolves, last_checked)` - `companies(id, name, domain, slug_candidates, source)` - `tenant_probes(slug, shard, site_guess, http_status, error_code, checked_at)` *(negative cache)* - `tenants(id, host, tenant, site, wd_shard, locale, status, source, verified_at, facet_counts, matched_req_count)` - `jobs(tenant_id, job_posting_id, external_path, req_id, title, location, posted_on, jd_text, jd_hash, can_apply, first_seen, last_seen, active)` - `matches(job_id, score_sem, score_bm25, score_total, visa_decision, reason)` - `identities(id, tenant_id, alias, alias_version, password_ref, status, profile_dir, proxy_ref, next_available_at, apps_today, fail_streak)` - `applications(id, tenant_id, job_posting_id, identity_id, profile_version, resume_path, status, attempt, external_app_id, submitted_at, artifact_dir, error, UNIQUE(tenant_id, job_posting_id))` - `answers(tenant_id, question_hash, question_text, answer, source, uses)` - `mail_events(message_id UNIQUE, alias, subject, received_at, kind, code, link, consumed_at)` - `funnel(application_id, stage, ts, latency_ms, cost_usd)` - `runs(id, stage, started_at, ended_at, counts_json, cost_usd)`
+**Canonical model: `plan-general.md` section 10.** This workstream declares extensions and Workday-specific columns only:
 
-## 15. Milestones
+- `tenants(id, host, tenant, site, wd_shard, locale, status, source, verified_at, facet_counts, matched_req_count)`
+- `tenant_probes(slug, shard, site_guess, http_status, error_code, checked_at)` - negative cache behind the S21/422 triage
+- `shards(host_suffix, resolves, last_checked)`
+- `postings` additions used here: `external_path`, `req_id` (from `bulletFields[0]`), `can_apply`
+- `answers(tenant_id, question_hash, question_text, answer, source, uses)` - the Workday question cache is an instance of the shared cache
+- `identities` (Workday accounts): `alias`, `alias_version`, `password_ref`, `profile_dir`, `proxy_ref`, `next_available_at`, `apps_today`, `fail_streak`
 
-| # | Scope | Acceptance |
-|---|---|---|
-| M0 | py3.13 `uv` project, config, migrations, CLI, `doctor`; write `.wslconfig` (28 GB); tune Ollama; pull `bge-m3`; add `pypdf`/`pdfplumber`; **HAR capture -> [?] verify detail/apply endpoints** | `doctor` green (Ollama+GPU+models, mail API, Patchright, DeepSeek balance + budget) |
-| M1a | Tenant discovery: inverted source + oracle + slug resolver + shard DNS + facet ranking | >=20 live tenants auto-found, >=80% correct slugs, zero manual entries |
-| M1b | Job discovery via `searchText` + `appliedFacets`, 20/page, incremental | matching reqs for 20 tenants < 3 min |
-| M2 | Match: dedupe -> filters -> visa -> BM25 + embeddings -> top-K | ranked top-K with reasons + visa decision, $0 |
-| M3 | Tailor: JD parse -> select -> rewrite -> validate -> PDF -> ATS gate | <=2 pp, text assertions pass, < $0.01/app |
-| M4 | Identity provisioning + mail verify (code **and** same-context link) + rotation | 3 tenants onboarded unattended; sessions survive restart |
-| M5 | Apply single tenant `--dry-run` to Review (default `park`) | 3 real jobs at Review, 0 manual inputs |
-| M6 | Multi-identity: scheduler, caps, per-identity proxy, ban detection, requeue | 20 apps / 3 tenants, >=80% submitted, no duplicate req |
-| M7 | Hardening: canary (incl. `errorCode` drift), cost report, prune/backup, response telemetry | 7-day green soak |
+Retired from this doc: the `jobs` and `funnel` table names (now `postings` and `events`, per the naming canon in `plan-general.md` section 10).
+
+
+## 15. Milestones (workstream steps)
+
+Program stages live in `plan-general.md` section 11. Workday steps hang off them:
+
+| Step | Stage | Scope | Acceptance |
+|---|---|---|---|
+| **G0-W** | G0 | HAR capture of one real Workday application; Patchright engine smoke test; canary tenant pick (Citi likely) | HAR saved to `artifacts/har/`; `data-automation-id` smoke test passes on a real tenant |
+| **G1-W1** | G1 | Tenant discovery: shard DNS, the 200/S21/422 oracle, slug candidates, inverted aggregator harvest, facet ranking | >= 20 live tenants auto-found, >= 80% correct site slugs, zero manual entries |
+| **G1-W2** | G1 | Job discovery: `searchText` + `appliedFacets`, 20/page, incremental | criteria-matching reqs for 20 tenants < 3 min; re-run incremental |
+| **G5-W1** | G5 | Identity onboarding: alias mint, persistent context, account creation, mail-worker verification (code **and** same-context link), rotation | 3 tenants onboarded unattended; sessions survive restart |
+| **G5-W2** | G5 | Apply state machine, `--dry-run` to Review | 3 real jobs at Review with 0 manual inputs |
+| **G5-W3** | G5 | Multi-identity: scheduler, caps, per-identity proxy, ban detection, requeue | 20 apps / 3 tenants, >= 80% submitted, no duplicate req |
+| **G6-W** | G6 | Canary incl. `errorCode` drift detection, recorded fixtures, profile prune/backup | canary green 7 days |
+
+**Retired series:** `M0` -> `G0` (+ `G0-W`), `M1a` -> `G1-W1`, `M1b` -> `G1-W2`, `M2`/`M3` -> `plan-general.md` G2 (not Workday-specific), `M4` -> `G5-W1`, `M5` -> `G5-W2`, `M6` -> `G5-W3`, `M7` -> `G6` + `G6-W`.
+
 
 ## 16. Risks -> mitigations
 
@@ -275,24 +248,23 @@ Provider creds format: `http://user:pass@gate.provider.net:8000` - **one sticky 
 | Account bans | pacing, no same-tenant parallelism, proxy isolation, alias rotation |
 | Resume parses badly | ATS-safe template + pdfplumber gate + DOCX fallback |
 
-## 17. Human actions
+## 17. Human actions (Workday-specific)
 
-1. **Proxy creds** (or "skip" -> concurrency stays 1).
-2. **`wsl --shutdown`** from Windows after `.wslconfig` is written (cannot be run from inside WSL - it kills this session).
-3. **Rotate** DeepSeek key + `AGENT_TOKEN` after wiring (deferred by your call).
-4. Confirm `@toesk.uk` catch-all routing exists (`doctor` verifies delivery, cannot fix CF config).
-5. **HAR capture**: DevTools -> Network -> Preserve log -> complete one manual Workday application on one target tenant -> save to `artifacts/har/`. This is the spec for M4.
-6. Provide an initial **target company list** (optional - discovery finds tenants, but a seed list improves the first run).
+Cross-channel actions are in `plan-general.md` section 13. Workday-only:
 
-## 18. Appendix - probe log (2026-10-11)
+1. **HAR capture** of one complete manual Workday application on a target tenant -> `artifacts/har/` (this is `G0-W`, and it is the spec for the apply flow).
+2. **Canary tenant**: confirm Citi (or another named tenant) as the first real target.
+3. **Proxy creds** assigned to Workday identities before `G5-W3`; until then `tenant_concurrency_cap = 1`.
 
-- `POST /wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs` -> 200, real data, `userAuthenticated:false`, no CSRF
-- wrong site -> 404 `S21 not found: Job_Posting_Site_ID=External`; bogus tenant -> 422 `HTTP_422`
-- `nvidia.wd11...` NXDOMAIN; `nvidia.wd1/3/5/12`, `citi.wd1/3/5`, `salesforce.wd1/12` resolve (wildcard)
-- root `/` -> 406/0 bytes for both real and bogus hosts
-- DeepSeek `/models` -> `deepseek-flash` (V4.1-Flash, 1M ctx, text+image), `deepseek-v4-pro`; balance $7.54
-- DeepSeek JSON-mode round trip 0.715 s; cache counters present
-- worker: 401 missing/bogus bearer, 204 OPTIONS preflight, ~50-90 ms
-- `nvidia-smi`: RTX 5060 Ti 16311 MiB, driver 610.88, compute 12.0; WSL MemTotal 15.9 GB
-- resume: valid PDF 1.5, 137619 bytes, no PDF tooling on the box
-- `patchright` py3-none wheels (3.10-3.14); `playwright-stealth` broken for `launch_persistent_context`
+
+## 18. Appendix - Workday probe log (2026-10-11)
+
+- `POST /wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs` -> **200**, real data, `userAuthenticated:false`, **no CSRF needed**
+- wrong site slug -> **404** `{"errorCode":"S21","message":"not found: Job_Posting_Site_ID=External"}`
+- bogus tenant, or a wrong tenant name on a real host -> **422** `{"errorCode":"HTTP_422","message":""}`
+- `nvidia.wd11.myworkdayjobs.com` NXDOMAIN; `nvidia.wd1/3/5/12`, `citi.wd1/3/5`, `salesforce.wd1/12` resolve (per-shard wildcard certs)
+- root `/` -> 406 with 0 bytes for **both** real and bogus hosts (needs browser-like TLS). `[?]` re-test with `curl_cffi impersonate="chrome"` at `G1-W1`
+- `limit:100` returned no `jobPostings` -> the limit is capped at **20**
+- NVIDIA reported `total: 2000` while its facets summed higher -> **treat `total` as a ceiling and use `facets`**
+
+Cross-channel probe results (mail worker, DeepSeek, hardware) are in `plan-general.md` sections 1 and 14.
