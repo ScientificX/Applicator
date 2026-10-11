@@ -1,0 +1,21 @@
+# Discovery sources polled by the hunt layer (G1).
+#
+# `family` selects the implementation in src/jobagent/discover/ats.py.
+# `boards` are vendor board tokens/slugs - they are DATA, never criteria (AGENTS.md 3.2).
+# An empty `boards` list means the family has no per-board config (aggregators).
+# Wrong tokens are cheap and expected: a 404 means "this company is not on that ATS",
+# which is itself a finding (it is how the Workday inverted harvest will work too).
+
+sources:
+  - family: greenhouse
+    enabled: true
+    boards: [anthropic, stripe, figma, datadog, airbnb]
+  - family: lever
+    enabled: true
+    boards: [palantir]
+  - family: ashby
+    enabled: true
+    boards: [ramp, linear, openai]
+  - family: remotive
+    enabled: true
+    boards: []

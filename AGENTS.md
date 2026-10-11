@@ -29,9 +29,10 @@ Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**.
 - Browsers/HTTP: **Patchright** (patched Playwright) + **curl_cffi**.
 - Mail: **`my-email-worker`** (Cloudflare Worker, sibling repo) — **inbound only**;
   the agent talks to it over HTTP.
-- Current stage: **`PS-5.4`, G0 landed** (uv scaffold, typed config, SQLite schema v1,
-  `doctor`, criteria title gate + test battery). **G1..G6 are not built yet** — most of
-  the package tree is planned, not scaffolded.
+- Current stage: **`PS-5.4`; `G0` met, `G1` in progress** on `feat/g1-hunt-layer` (hunt layer +
+  Workday `cxs` discovery: `net.py`, `models.py`, `discover/`). **`G2..G6` are not built.**
+  Status of record is `plan-general.md` section 11: `G0` met, `G1` **partial** (8 live tenants vs
+  the >= 20 target; site-slug resolution 50% vs >= 80%). Do not treat G1 as closed.
 
 ## 2. Where the truth lives (read these; do not restate them)
 
@@ -109,13 +110,17 @@ Prefer `uv run ...` in a fresh checkout; the local interpreter works too
 | `uv run jobagent config show [--json]` | print parsed criteria + proxy posture |
 | `uv run jobagent db init` | create/upgrade the SQLite schema |
 | `uv run jobagent db status` | schema version + row counts |
+| `uv run jobagent tenants` | list known tenants from the DB |
+| `uv run jobagent tenants --discover [--refresh] [--limit N] [--concurrency N]` | probe seed candidates through the `cxs` oracle (G1-W1); writes `tenants` + `tenant_probes` |
+| `uv run jobagent discover [--family F] [--max-pages N] [--search S]` | poll all configured sources and upsert `postings` (G1) |
 | `uv run pytest -q` | run the test suite (`tests/`) |
 | `uv run python scripts/lint_criteria.py` | run the pinned title battery against `config/criteria.yaml` (exit 1 on mismatch) |
 | `uv run patchright install chromium` | install the browser Patchright drives |
+| `uv run python scripts/probe_endpoints.py` | live, read-only probe of the four source families + the Workday landing page under Chrome impersonation (resolves `[?]` HTTP questions; needs network) |
 
-`jobagent` subcommands `tenants`, `discover`, `match`, `tailor`, `apply`, `onboard`,
-`run`, `report` are **labelled stubs** that exit 2 and name the stage that will build them.
-Replace a stub only when you implement that stage.
+`jobagent` subcommands `match`, `tailor`, `apply`, `onboard`, `run` and `report` are still
+**labelled stubs** that exit 2 and name the stage that will build them; `tenants` and `discover`
+were implemented at G1. Replace a stub only when you implement that stage.
 
 **Exit codes:** `doctor` -> 1 if any check FAILs (WARN never fails); stub -> 2;
 `db status` -> 1 when there is no database yet.
@@ -146,6 +151,10 @@ Before you call a change finished:
   (`test_<module>.py`). Test the **real** loaded config
   (`from jobagent.config import load_criteria`), not a hand-rolled copy — the filters battery
   works this way on purpose (a criteria edit that flips a case is caught, not masked).
+- Async tests are first-class: `pytest-asyncio` is a dev dependency with `asyncio_mode = "auto"`
+  (added at G1 for `tests/test_discover.py`), so an `async def test_*` needs no decorator. Anything
+  that touches the network belongs in `scripts/` (e.g. `scripts/probe_endpoints.py`), never in the
+  suite — `uv run pytest -q` must stay offline and deterministic.
 - Type-annotate public callables; modules open with `from __future__ import annotations`.
 - **Line endings are LF everywhere**, on both hosts — `.gitattributes` (`* text=auto eol=lf`)
   is the only authority. Git for Windows ships `core.autocrlf=true`, which materialises a
@@ -275,10 +284,11 @@ Keep commits focused; the MR description, not the commit body, carries the narra
 
 ### 9.4 Push the branch and open a merge request
 
-`origin` is configured as **`https://github.com/ScientificX/Applicator.git`** (HTTPS).
-SSH is **not** usable from this machine (no key under `~/.ssh`); HTTPS works through the
-VS Code git credential helper. Confirm before pushing, and never push to a remote you did not
-verify:
+`origin` is configured as **`git@github.com:ScientificX/Applicator.git`** (SSH) - verified at G1,
+where `git push -u origin feat/g1-hunt-layer` succeeded over SSH. *(This section previously claimed
+HTTPS with "SSH is not usable"; that was wrong - the remote is SSH and it works. Fallback if SSH
+ever breaks: `git remote set-url origin https://github.com/ScientificX/Applicator.git`.)*
+Confirm before pushing, and never push to a remote you did not verify:
 
 ```bash
 git remote -v
@@ -315,7 +325,8 @@ repo's default branch is `main`; if GitHub's default `HEAD` is ever left on a fe
 
 ## 10. Where code goes (module map)
 
-Implemented today: `config.py`, `db.py`, `filters.py`, `checks.py`, `cli.py`.
+Implemented today: `config.py`, `db.py`, `filters.py`, `checks.py`, `cli.py`, `net.py`,
+`models.py`, and the `discover/` package (G1).
 Planned (see `docs/architecture.md` and `docs/design.md`; do not create modules before the
 stage that needs them):
 
@@ -325,8 +336,12 @@ src/jobagent/
   db.py          # SQLite DDL, migrations, helpers             (G0, done)
   filters.py     # title gate (include/veto)                   (G0, done)
   checks.py      # doctor checks                               (G0, done)
-  cli.py         # Typer app: doctor, config, db + stubs       (G0, done)
-  discover/      # DiscoverySource + TenantSource impls        (G1)
+  cli.py         # Typer app: doctor, config, db, tenants,     (G0 + G1)
+                 #   discover + stubs
+  net.py         # HttpClient: curl_cffi, politeness, retries   (G1, done)
+  models.py      # Source, Posting - shared domain objects      (G1, done)
+  discover/      # base.py protocols, store.py upsert,          (G1, done)
+                 #   ats.py, workday_cxs.py, workday_tenants.py
   match/         # dedupe, filters, visa, scoring              (G2)
   tailor/        # select-and-patch resume + gates             (G2)
   apply/         # ApplyChannel impls, onboarding, questions   (G3/G5)

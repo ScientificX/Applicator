@@ -91,6 +91,7 @@ Trust and ownership boundaries:
 +---------------------------------------------------------------------------+
 |                          shared infrastructure                            |
 |  db.py (SQLite, migrations)    mail/  (worker client, attributer)         |
+|  net.py (curl_cffi HTTP)       models.py (Source, Posting)                |
 |  llm/ (client, tiers, cost)    channels.py (channel-selection policy)     |
 |  apply/ (ApplyChannel impls, onboarding, question cache)                  |
 +---------------------------------------------------------------------------+

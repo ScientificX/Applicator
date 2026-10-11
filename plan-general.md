@@ -136,6 +136,8 @@ budget: { max_cost_per_run_usd: 1.00, max_cost_per_day_usd: 3.00 }   # balance i
 
 **Headline metric: response rate per channel and per source** - measured from inbound ATS mail, not guessed. Supporting: apps/day, cost/app, time-to-apply after posting, zero duplicate applications, **company-level attribution rate**, **application-level attribution rate**, unattributed rate.
 
+**Measured at G1 (2026-10-11):** postings stored **3775** (greenhouse 2119, ashby 1008, workday 320, lever 310, remotive 18); duplicate `(source, source_id)` rows **0**; Workday postings carrying a req id **320/320**; live tenants **8 of 16** confirmed tenants (site-slug resolution 50%); `doctor` green. **Not measured:** time-to-apply after posting (no scheduler until G6), reply rates (G3/G4).
+
 ### 2.1 Criteria (target profile) - `config/criteria.yaml`
 
 System-wide, not channel-specific.
@@ -336,8 +338,8 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 
 | # | Scope | Hand-off (read) | Acceptance |
 |---|---|---|---|
-| **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; native-host preflight (RAM/GPU/Ollama/Chromium); Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) |
-| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean |
+| **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; native-host preflight (RAM/GPU/Ollama/Chromium); Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) - **MET 2026-10-11**, re-verified on the Windows host (status below) |
+| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean - **PARTIAL 2026-10-11**: 3775 postings stored (greenhouse 2119, ashby 1008, workday 320, lever 310, remotive 18), **0 duplicate `(source, source_id)` rows**, Workday req ids **320/320**; **tenant half NOT met**: 8 live tenants vs >= 20, site-slug resolution 8/16 = 50% vs >= 80% (gap row in section 12). Gate **H1a not passed** |
 | **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | - | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
 | **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, account signup + verification via the worker | - | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
 | **G4** | **Inbound analytics**: two-tier attribution (company, then application), classification, response-rate report | - | report matches a manual spot-check of 20 applications; company-level >= 95%; application-level target >= 80% |
@@ -345,18 +347,28 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 | **G6** | **Autonomy + hardening**: scheduler caps, identity rotation, canary, cost report, prune/backup, runbook | **H2 <- `plan-workday.md` section 12** | 7-day unattended soak; quota never exceeded; zero duplicate applications; attribution accuracy >= 95% |
 | *(deferred)* | *Email as a submission channel* | *Appendix B - not scheduled* | *-* |
 
-**G0 status — met, and re-verified on the native Windows host (2026-10-11).** Evidence:
-`jobagent doctor` exits 0 (`all checks passed`, 1 WARN: `AGENT_TOKEN` unset by design), `uv run
-pytest -q` = 28 passed, Patchright chromium 153 launches headless, GPU + models reachable (ollama
-answering was still the WSL `0.16.1` - the native build is installed but blocked on the port,
-section 13 item 5),
-DeepSeek balance $6.85 vs $3.00/day cap. Offline `uv 0.11.7`, `git 2.55.0.windows` and Ollama are
-per-user installs (no admin). MR: `fix/windows-native-host`. Re-verification was needed because the
-move off WSL changed the memory probe, the console and the Ollama topology (sections 1.4, 12).
+**G0 status — met (2026-10-11), re-verified on the native Windows host.** Evidence: `jobagent doctor`
+exits 0 (`all checks passed`, 1 WARN: `AGENT_TOKEN` unset by design); `uv run pytest -q` = **49 passed**
+with the G1 hunt layer in the tree (28 at the scaffold, +21 from `tests/test_discover.py` and
+`tests/test_checks.py`); Patchright chromium 153 launches headless; GPU reachable (RTX 5060 Ti,
+compute 12.0); the Ollama answer was still the WSL `0.16.1` - the native build is installed but
+blocked on the port (section 13 item 5); DeepSeek balance $6.85 against the $3.00/day cap;
+`uv 0.11.7`, `git 2.55.0.windows` and Ollama are per-user installs (no admin). MRs:
+`fix/windows-native-host` (host move, merged) and `feat/g1-hunt-layer` (G1, this branch).
+
+**G1 status — PARTIAL (2026-10-11).** Measured on the Windows host from a live hunt run: 3775 postings
+across five sources, 0 duplicate `(source, source_id)` rows, Workday postings carrying a req id 320/320.
+The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; site-slug resolution
+8/16 = 50% vs >= 80%), so **H1a is not passed** (section 11.1) and the gap is a risk row in section 12.
 
 ### 11.1 Gates (the seam in detail)
 
 **H1a - discovery seam (enters G1).** Workday discovery lands first because it is cheap: no browser, no accounts, no mail. *Preconditions:* the general `DiscoverySource` protocol plus `postings` / `companies` / `tenant_probes` / `shards` migrations are landed, and the `curl_cffi` client wrapper exists. *Exit:* `WorkdayCxsDiscovery` and `WorkdayTenantDiscovery` pass their acceptance rows, and the hunt layer consumes them through the protocol with no Workday-specific branches.
+
+> **Status 2026-10-11 — OPEN (partial).** Preconditions are met and both classes exist; the hunt
+> layer consumes them with no Workday branches (exit condition 2 **met**). Acceptance rows are
+> **not** met: 8 live tenants against the >= 20 target, and site-slug resolution 8/16 = 50%
+> against >= 80%. **The gate is not passed**, and the gap is a risk row in section 12.
 
 **H1b - apply seam (enters G5).** *Preconditions:* G3 proven end to end on a non-Workday channel; attribution working on real mail **including at least one Workday ack** (tier 1 at minimum); the address model live; per-identity proxies assigned; **HAR captured**; `doctor` green; budget caps in place. *Exit:* `WorkdayWebApply` satisfies the `ApplyChannel` protocol; `--dry-run` reaches Review with zero manual inputs; parks are first-class outcomes rather than errors.
 
@@ -378,6 +390,7 @@ move off WSL changed the memory probe, the console and the Ollama topology (sect
 | Rich output dies on the Windows ANSI code page whenever it is captured (`jobagent doctor \| tail`, CI, log file) | `make_console()`: UTF-8 streams + no Rich legacy-Windows path; regression test in `tests/test_checks.py` |
 | A WSL-republished port shadows the native stack (observed: `wslrelay` holding 11434, blocking native Ollama and serving `0.16.1` to Windows clients instead) | retire the WSL Ollama systemd unit and confirm `/api/version` reports the native build before a run (section 13); keep only one Ollama per host |
 | WSL is retired but surprises remain in the docs/toolchain (`wsl --shutdown`, `.wslconfig`, Linux-only probes) | `doctor` is host-agnostic with a Windows branch (section 1.4); plan/workstream/AGENTS docs updated in the same MR; WSL stays only as a legacy checkout |
+| **Tenant site-slug resolution is the weak link (50%)** | measured at G1: the oracle finds tenants cheaply (16/50 candidates real) but slug templating resolved only 8 of 16. Mitigation: harvest slugs from company careers domains / syndicated apply URLs (the plan's inverted-first default), expand templates, and keep `status = site_unknown` rows instead of discarding confirmed tenants |
 
 ## 13. Human actions
 
@@ -391,7 +404,7 @@ move off WSL changed the memory probe, the console and the Ollama topology (sect
 8. *Deferred:* rotate the DeepSeek key and `AGENT_TOKEN`; onboard a sending subdomain if Appendix B is ever taken up.
 ## 14. Appendix A - verified vs assumed
 
-**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B). **After the move to a native Windows host (2026-10-11):** the host itself - native Ollama 0.40.3 on `127.0.0.1:11434`, 31.1 GB RAM, `C:` free space, Patchright chromium 153 headless launch, winget per-user installs, and the `wslrelay` port-squatting behaviour in section 1.4.
+**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); the live response shapes of four non-Workday sources (Greenhouse and Ashby board APIs, Lever postings API, Remotive) and that **Remotive exposes no employer-ATS URLs** (so it cannot feed the inverted Workday harvest); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B). **After the move to a native Windows host (2026-10-11):** the host itself - native Ollama 0.40.3 serving either `127.0.0.1:11435` (WSL unit still holding 11434) or `11434`, 31.1 GB RAM, `C:` free space, Patchright chromium 153 headless launch, winget per-user installs, and the `wslrelay` port-squatting behaviour in section 1.4.
 
 **Assumed / to verify** (owner = which doc resolves it):
 
