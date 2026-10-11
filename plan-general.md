@@ -182,10 +182,10 @@ Nothing here requires sending mail. The email channel is a *tactic*, not a prere
 
 ## 9. Worker service extensions (revised - inbound-first)
 
-**Good news: v1 needs almost no worker changes.** The existing API (list/read/latest/delete by recipient, KV-indexed by recipient, Bearer auth) already covers alias attribution and verification. Work items are small:
+**Good news: v1 needs almost no worker changes.** The existing API (list/read/latest/delete by recipient, KV-indexed by recipient, Bearer auth) already covers attribution and verification. Work items are small:
 
-- **Agent-side:** alias registry (pool, tier, purpose, burn state); per-`receivedAt` staleness handling; `message_id` idempotency; classification of ATS mail.
-- **Worker, phase 1:** keep as-is. Only add `GET /stats?since=` (counts by alias/kind/day) and a retention policy note - KV entries never expire on their own, so the agent must prune as it reads.
+- **Agent-side:** address registry (`role: contact | ats_account`, burn state); an **attributer** that joins inbound mail to applications (section 6.2); per-`receivedAt` staleness handling; `message_id` idempotency; ATS mail classification.
+- **Worker, phase 1:** keep as-is. Only add `GET /stats?since=` (counts by recipient/kind/day) and a retention policy note - KV entries never expire on their own, so the agent must prune as it reads.
 - **Worker, phase 2 (when volume grows):** optional **D1** binding for queryable history + exact counters (KV is list-only and eventually consistent); outbound-event plumbing is *not* needed yet.
 - **Worker, phase 3:** dashboard/`/stats` JSON consumed by `jobagent report`.
 - Any new route: keep `AGENT_TOKEN` auth + CORS, extend `test/index.spec.ts`.
@@ -228,7 +228,7 @@ Supersedes `plan.md` section 14 where they differ:
 | 48-char subject slug clips the role | fall back to the full subject in KV metadata, then the body text; never attribute from a truncated slug alone |
 | ATS mail mis-classified | sample audit each week; keep `confidence`; fall back to `other` and queue for review |
 | KV fills up (entries never expire) | agent prunes on read; add retention + optional D1 at volume |
-| Workday/ATS account bans | per-identity proxies, pacing, cooldown, alias rotation, requeue unsubmitted work |
+| Workday/ATS account bans | per-identity proxies, pacing, cooldown, account-address rotation, requeue unsubmitted work |
 | Duplicate or embarrassing repeat applications | `UNIQUE(posting_id)`, company+title dedupe, application ledger |
 | Expectation risk: nothing here bypasses an ATS | section 7 ladder + measure response rate per channel and re-weight `score_prior` from real data |
 | Workers Free-plan CPU limits | Workers Paid; keep handlers thin; heavy parsing stays in the agent |
@@ -251,7 +251,7 @@ Supersedes `plan.md` section 14 where they differ:
 - Whether ATS subjects/senders consistently expose company + role - measured by the `unattributed` metric in G4; the design degrades to body reads and time windows rather than guessing (`[?]`).
 - How ATS spam heuristics weight aliased vs plain addresses (`[?]` - moot for attribution now; the single stable address removes the variable anyway).
 - Non-Workday ATS apply endpoints (Greenhouse/Ashby apply POSTs are undocumented internals, same as Workday - `[?]` verify by HAR).
-- Whether ATS status mail consistently includes a req id/title that lets us disambiguate aliases that carry several applications (`[?]` - fall back to `submitted_at` window matching).
+- Whether ATS status mail consistently includes a req id/title that lets us disambiguate several applications at the same company (`[?]` - fall back to `submitted_at` window matching).
 - The account's numeric daily **sending** quota (only relevant to Appendix B).
 
 ## 15. Appendix B - DEFERRED OPTION: email as a submission channel
