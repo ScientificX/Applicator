@@ -141,7 +141,7 @@ target:
   seniority: [mid, senior]                       # "AVP-ish" IC
   title_include: ['\bAVP\b','Assistant Vice President','Senior Software Engineer',
                   'Backend Engineer','Java Engineer','Software Engineer (III|IV)','Lead Engineer']
-  title_exclude: ['Intern','Graduate','Analyst','Associate','Principal','Director','\bVP\b','Manager']
+  title_exclude: ['Intern','Graduate','Analyst','Principal','Director','\bVP\b','Manager']
   stack_must: ['Java','Spring','microservices','REST','SQL']
   stack_nice: ['Kafka','Kubernetes','Docker','AWS','Azure','GCP','Terraform','low.?latency',
                'distributed','JUnit','Mockito','CI/CD','observability']
