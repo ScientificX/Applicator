@@ -116,6 +116,7 @@ Prefer `uv run ...` in a fresh checkout; the local interpreter works too
 | `uv run pytest -q` | run the test suite (`tests/`) |
 | `uv run python scripts/lint_criteria.py` | run the pinned title battery against `config/criteria.yaml` (exit 1 on mismatch) |
 | `uv run patchright install chromium` | install the browser Patchright drives |
+| `uv run python scripts/probe_endpoints.py` | live, read-only probe of the four source families + the Workday landing page under Chrome impersonation (resolves `[?]` HTTP questions; needs network) |
 
 `jobagent` subcommands `match`, `tailor`, `apply`, `onboard`, `run` and `report` are still
 **labelled stubs** that exit 2 and name the stage that will build them; `tenants` and `discover`
@@ -150,6 +151,10 @@ Before you call a change finished:
   (`test_<module>.py`). Test the **real** loaded config
   (`from jobagent.config import load_criteria`), not a hand-rolled copy — the filters battery
   works this way on purpose (a criteria edit that flips a case is caught, not masked).
+- Async tests are first-class: `pytest-asyncio` is a dev dependency with `asyncio_mode = "auto"`
+  (added at G1 for `tests/test_discover.py`), so an `async def test_*` needs no decorator. Anything
+  that touches the network belongs in `scripts/` (e.g. `scripts/probe_endpoints.py`), never in the
+  suite — `uv run pytest -q` must stay offline and deterministic.
 - Type-annotate public callables; modules open with `from __future__ import annotations`.
 - **Line endings are LF everywhere**, on both hosts — `.gitattributes` (`* text=auto eol=lf`)
   is the only authority. Git for Windows ships `core.autocrlf=true`, which materialises a

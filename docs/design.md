@@ -173,7 +173,8 @@ DDL: str                                              # all CREATE TABLE/INDEX s
 
 def connect(path: str | Path) -> sqlite3.Connection   # mkdir parents; row_factory=Row;
                                                       # PRAGMA foreign_keys=ON, journal_mode=WAL,
-                                                      # busy_timeout=5000
+                                                      # busy_timeout=15000 (raised at G1: concurrent
+                                                      # CLI runs contend on one DB)
 def migrate(conn: sqlite3.Connection) -> int          # executescript(DDL); stamps schema_version
 def schema_version(conn: sqlite3.Connection) -> int   # 0 if unset
 def table_names(conn: sqlite3.Connection) -> list[str]
@@ -716,6 +717,10 @@ than silently downgrading. Caps come from `Settings.jobagent_max_cost_per_run_us
 ## 13. Testing contract
 
 - Runner: `uv run pytest -q` (config in `pyproject.toml`: `testpaths = ["tests"]`).
+- Async tests are first-class: `pytest-asyncio` is a dev dependency with `asyncio_mode = "auto"`
+  (added at G1 for `tests/test_discover.py`), so an `async def test_*` needs no decorator.
+- Anything that touches the network lives in `scripts/` (e.g. `scripts/probe_endpoints.py`), never in
+  the suite: `uv run pytest -q` must stay offline and deterministic.
 - One module per concern: `tests/test_<module>.py`. Shipping gates today: `tests/test_filters.py`
   (title gate) and `tests/test_checks.py` (`doctor`'s platform probes + the console).
 - Platform-specific code is exercised on the host that owns the branch
