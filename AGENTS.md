@@ -43,7 +43,7 @@ Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**.
 | [`plan-workday.md`](plan-workday.md) | workstream W (Workday) | `cxs` endpoints + oracle, shards/site discovery, apply state machine + selectors, onboarding, HAR fixtures |
 | [`docs/architecture.md`](docs/architecture.md) | **high-level design** | component map, layering, seams/gates, data flow, runtime view |
 | [`docs/design.md`](docs/design.md) | **low-level design** | class/API contracts, DB columns, config schemas, HTTP contracts |
-| `../my-email-worker/AGENT_ONBOARDING.md` | mail service contract | the worker's HTTP API only |
+| `../my-email-worker/AGENT_ONBOARDING.md` | mail service contract | the worker's HTTP API only (from a worktree it is `../../my-email-worker/AGENT_ONBOARDING.md`, §9.1) |
 
 **Conflict rule:** if two docs disagree, `plan-general.md` wins and the loser gets fixed.
 The workstream doc never restates shared design — it references it.
@@ -78,6 +78,10 @@ The workstream doc never restates shared design — it references it.
 
 Native Windows checkout — the runtime host. `uv`, `git` (Credential Manager) and Patchright's
 Chromium are all per-user installs, so nothing here needs admin rights.
+
+Layout: the **primary checkout** is `C:\Users\favou\development\job-agent`, and every working copy
+lives in `C:\Users\favou\development\.worktrees\job-agent-<slug>` (§9.1). `~/development` holds one
+directory per project plus `.worktrees` — nothing else.
 
 ```powershell
 cd C:\Users\favou\development\job-agent
@@ -246,23 +250,35 @@ checkout on `main` to "test something quickly" — spin up a worktree.
 
 ### 9.1 Create a worktree on a new branch
 
-Worktrees live **outside** the repo as siblings, matching `../my-email-worker`, so the
-primary checkout stays clean and on `main`.
+Worktrees live **outside** the repo, under `~/development/.worktrees/`
+(`C:\Users\favou\development\.worktrees\` on Windows) — **not** as siblings of the repo. `~/development`
+holds one directory per project plus `.worktrees`; a directory per branch is exactly the clutter this
+rule prevents.
 
 ```powershell
 cd C:\Users\favou\development\job-agent
 git fetch --all --prune                 # if a remote exists
-git worktree add ../job-agent-<slug> -b <type>/<slug>   # branches from current main
-cd ../job-agent-<slug>
-uv sync                                 # worktree has no .venv of its own
+New-Item -ItemType Directory -Force ..\.worktrees | Out-Null         # one-off
+git worktree add ../.worktrees/job-agent-<slug> -b <type>/<slug>     # branches from current main
+cd ../.worktrees/job-agent-<slug>
+uv sync                                 # a worktree has no .venv of its own
+Copy-Item ..\job-agent\.env .env        # ...and no .env either: it is gitignored, so `doctor`
+                                        # FAILs (`address` unset) until you copy it in
 ```
+
+POSIX equivalent, when working in a Linux/WSL checkout:
+`git worktree add ~/development/.worktrees/job-agent-<slug> -b <type>/<slug>`.
 
 - `<type>` follows the commit convention: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
 - `<slug>` is short and describes the unit of work, e.g. `g1-workday-cxs-discovery`,
   `fix/title-veto-avp-guard`.
 - One worktree = one branch = one MR. Do not bundle unrelated changes.
-- When done, remove the worktree: `git worktree remove ../job-agent-<slug>` (from the primary
-  checkout, after the branch is merged/pushed).
+- From a worktree the sibling mail repo is **two** levels up:
+  `../../my-email-worker/AGENT_ONBOARDING.md` (see §2).
+- A worktree created under the old `../job-agent-<slug>` convention can be relocated with
+  `git worktree move ../job-agent-<slug> ~/development/.worktrees/job-agent-<slug>`.
+- When done, remove the worktree: `git worktree remove ~/development/.worktrees/job-agent-<slug>`
+  (from the primary checkout, after the branch is merged/pushed).
 
 ### 9.2 Do the work
 
@@ -320,8 +336,9 @@ repo's default branch is `main`; if GitHub's default `HEAD` is ever left on a fe
 ### 9.5 After the MR
 
 - Do not merge your own MR unless the human explicitly asks.
-- Delete the worktree/branch once merged: `git worktree remove ../job-agent-<slug>`
-  and `git branch -d <type>/<slug>` (or `git push origin --delete <type>/<slug>`).
+- Delete the worktree/branch once merged:
+  `git worktree remove ~/development/.worktrees/job-agent-<slug>` and `git branch -d <type>/<slug>`
+  (or `git push origin --delete <type>/<slug>`).
 
 ## 10. Where code goes (module map)
 
