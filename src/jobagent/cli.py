@@ -8,6 +8,7 @@ Everything else is a labelled stub naming the stage that will build it
 from __future__ import annotations
 
 import json
+import sys
 
 import typer
 from rich.console import Console
@@ -23,7 +24,33 @@ config_app = typer.Typer(help="Inspect the parsed configuration.")
 db_app = typer.Typer(help="Database management.")
 app.add_typer(config_app, name="config")
 app.add_typer(db_app, name="db")
-console = Console()
+
+
+def make_console() -> Console:
+    """Build the Rich console so it works on the Windows host too.
+
+    Windows Python encodes the standard streams with the ANSI code page (cp1252 here).
+    Rich's *legacy Windows* render path (`console.py`: `legacy_windows` + a standard
+    stream fd -> `_win32_console.WindowsConsole`) then encodes the box-drawing glyphs of
+    every table with that code page and `console.print(table)` dies with
+    UnicodeEncodeError - i.e. `doctor`, the G0 gate, crashed whenever its output was
+    captured (`| tail`, CI, a log file).
+
+    Two independent guards, because either one alone leaves a hole:
+      * reconfigure the streams to UTF-8, so a captured stream can carry the glyphs;
+      * keep Rich off the legacy path, since `WindowsConsole` ignores the stream's
+        encoding and falls back to the locale's ANSI code page.
+    """
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure is not None:
+                reconfigure(encoding="utf-8", errors="replace")
+        return Console(legacy_windows=False)
+    return Console()
+
+
+console = make_console()
 
 STATUS_STYLE = {"OK": "green", "WARN": "yellow", "FAIL": "red", SKIP: "dim"}
 

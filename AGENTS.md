@@ -19,6 +19,10 @@ best available channel, and measures what actually gets responses.
 Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**.
 
 - Language/runtime: **Python 3.13**, managed with **`uv`** (`.python-version` pins 3.13).
+- **Host: Windows 11, native** — repo at `C:\Users\favou\development\job-agent`, sibling
+  worktrees beside it, `.venv\Scripts\python.exe` as the local interpreter. **WSL is not the
+  runtime host** (it was until the `fix/windows-native-host` change); the code stays
+  host-agnostic, but Windows is the platform of record (§4, `docs/architecture.md` §10).
 - Storage: **SQLite** (`state/jobagent.db`), schema versioned by `db.py` (`SCHEMA_VERSION`).
 - LLMs: **DeepSeek `deepseek-flash`** (cloud) + **Ollama** (local `qwen3:8b`/`qwen3:14b`,
   embeddings `bge-m3`).
@@ -71,19 +75,32 @@ The workstream doc never restates shared design — it references it.
 
 ## 4. Environment setup
 
-```bash
-cd /home/favou/development/job-agent
-uv sync                      # create/refresh .venv from pyproject.toml + uv.lock
-cp -n .env.example .env      # then fill in (never commit .env)
+Native Windows checkout — the runtime host. `uv`, `git` (Credential Manager) and Patchright's
+Chromium are all per-user installs, so nothing here needs admin rights.
+
+```powershell
+cd C:\Users\favou\development\job-agent
+uv sync                                   # create/refresh .venv from pyproject.toml + uv.lock
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }   # then fill in (never commit .env)
 uv run patchright install chromium
 ```
 
-`src/jobagent/config.py` loads `.env` automatically and resolves repo-relative paths
-(`state/`, `artifacts/`) against the repo root.
+- **Ollama belongs on the native Windows host**, on `127.0.0.1:11434` - which is what `OLLAMA_BASE`
+  already points at. While a WSL Ollama still runs, WSL's localhost relay (`wslrelay.exe`) owns
+  that port on the Windows side, so the native server has to be started with
+  `OLLAMA_HOST=127.0.0.1:11435` *and Windows clients silently reach the WSL instance instead*
+  (`plan-general.md` §13 item 5 - retire the unit to end this). Never run two Ollamas. Tune the
+  native server with the user environment variables `OLLAMA_MAX_LOADED_MODELS=1`,
+  `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`.
+- `src/jobagent/config.py` loads `.env` automatically and resolves repo-relative paths
+  (`state/`, `artifacts/`) against the repo root, so `.env` values are host-independent.
+- `my-email-worker` is a **sibling repo with no remote**: it lives at
+  `C:\Users\favou\development\my-email-worker` and exists nowhere else. Copy it, don't clone.
 
 ## 5. Commands
 
-Prefer `uv run ...` in a fresh checkout; the local `.venv/bin/python` works too.
+Prefer `uv run ...` in a fresh checkout; the local interpreter works too
+(`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` on Linux/WSL).
 
 | Command | Purpose |
 |---|---|
@@ -118,6 +135,8 @@ Before you call a change finished:
       are updated in the same MR** — milestone status flipped, gate recorded, metrics measured,
       `[?]` -> `[V]` (**§8.1 — mandatory**).
 - [ ] `AGENTS.md` still describes the repo accurately; update it if anything in §1-§7 changed.
+- [ ] Line endings are still LF: only `.gitattributes` (`* text=auto eol=lf`) decides them and
+      nothing was re-written as CRLF (§7).
 - [ ] No secrets, no `state/`, no `artifacts/`, no `.env` staged for commit.
 
 ## 7. Testing & code conventions
@@ -128,6 +147,13 @@ Before you call a change finished:
   (`from jobagent.config import load_criteria`), not a hand-rolled copy — the filters battery
   works this way on purpose (a criteria edit that flips a case is caught, not masked).
 - Type-annotate public callables; modules open with `from __future__ import annotations`.
+- **Line endings are LF everywhere**, on both hosts — `.gitattributes` (`* text=auto eol=lf`)
+  is the only authority. Git for Windows ships `core.autocrlf=true`, which materialises a
+  checkout as CRLF, so on a fresh Windows checkout run `git config core.autocrlf false`, and if
+  a tree is already CRLF re-materialise it once with `git rm --cached -r .` then `git reset --hard`.
+- **Never let a host assume the OS.** Probe it (`sys.platform`, `/proc`) behind a helper and
+  keep the failure mode a WARN, not an exception: `doctor` must run on Windows *and* WSL
+  (`checks.py`, `tests/test_checks.py`).
 - Keep modules small and single-purpose, with a short module docstring that names the plan
   section it implements (see `db.py`, `filters.py` for the house style).
 - Import package internals relatively (`from .config import ...`); the CLI is the only
@@ -214,8 +240,8 @@ checkout on `main` to "test something quickly" — spin up a worktree.
 Worktrees live **outside** the repo as siblings, matching `../my-email-worker`, so the
 primary checkout stays clean and on `main`.
 
-```bash
-cd /home/favou/development/job-agent
+```powershell
+cd C:\Users\favou\development\job-agent
 git fetch --all --prune                 # if a remote exists
 git worktree add ../job-agent-<slug> -b <type>/<slug>   # branches from current main
 cd ../job-agent-<slug>

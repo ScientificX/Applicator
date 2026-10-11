@@ -2,15 +2,15 @@
 
 **Doc set `PS-5.4`** - the program. Umbrella plan for a multi-channel, multi-ATS autonomous job application agent.
 
-- **Project root:** `/home/favou/development/job-agent`
+- **Project root:** `C:\Users\favou\development\job-agent` (native Windows host since 2026-10-11; the WSL checkout at `/home/favou/development/job-agent` is retired)
 - **Entry point:** [`README.md`](README.md) - start there. Workstream doc: [`plan-workday.md`](plan-workday.md); mail contract: `../my-email-worker/AGENT_ONBOARDING.md`
 - **Status:** design + verified facts. Nothing scaffolded yet. `[V]` = verified, `[?]` = to verify.
 - **Stack:** Python 3.13 (`uv`) - DeepSeek `deepseek-flash` (cloud) - Ollama (local) - Patchright / curl_cffi (web apply) - Cloudflare Email Service (**inbound only, for now**)
 
 ## START HERE
 
-**Begin at G0**: `uv` scaffold, `config/`, DB migrations, CLI skeleton, `doctor`, `.wslconfig`,
-Ollama tuning + `bge-m3`.
+**Begin at G0**: `uv` scaffold, `config/`, DB migrations, CLI skeleton, `doctor`, native-host
+preflight (RAM/GPU/Ollama/Chromium), Ollama tuning + `bge-m3`.
 
 ### Doc roles
 
@@ -90,7 +90,11 @@ Researched, verified, and **not needed for v1**. Kept because it is a real futur
 
 ### 1.4 LLM + hardware [V]
 
-`deepseek-flash` (1M ctx, text+**image**, JSON mode verified, prompt-cache counters exposed, $7.54 balance), `deepseek-v4-pro` for escalation. Local: Ollama 0.16.1, `qwen3:8b` present, `bge-m3` to pull; RTX 5060 Ti 16 GB (sm_120 -> Ollama-only for GPU), WSL RAM 15.9 GB (raise to 28 GB).
+`deepseek-flash` (1M ctx, text+**image**, JSON mode verified, prompt-cache counters exposed, **$6.85 balance** at the last check), `deepseek-v4-pro` for escalation.
+
+**Local models run natively on the Windows host.** Ollama **0.40.3** is installed natively (`winget install Ollama.Ollama`, per-user, no admin) with `bge-m3` + `qwen3:8b` already in the Windows store; it was verified serving `127.0.0.1:11435` and takes the default `127.0.0.1:11434` the moment the WSL unit is retired (quirk below). `qwen3:14b` still to pull; `glm-4.7-flash`, 19 GB, is too big for the free VRAM and is not used. Host: Windows 11, Ryzen 7 7700, **31.1 GB RAM**, 133 GB free on `C:`; RTX 5060 Ti 16 GB (compute 12.0, driver 610.88, sm_120 -> Ollama-only for GPU); Patchright chromium 153 launches headless here. Server tuning moved from the WSL systemd unit to Windows user env vars (`OLLAMA_MAX_LOADED_MODELS=1`, `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`).
+
+**Local-port quirk, verified while moving off WSL [V]:** a service running *inside* WSL is republished on the Windows side by WSL's `wslrelay.exe`. `127.0.0.1:11434` was held by `wslrelay` proxying to the WSL Ollama, so the native server could not start (`bind: Only one usage of each socket address ... is permitted`) and Windows clients silently reached the WSL instance instead (it answered `0.16.1`). Retiring the WSL Ollama unit is therefore a precondition of the native setup (section 13). Historical readings elsewhere ("WSL RAM 15.9 GB", "no `.wslconfig`") are superseded: the host has 31.1 GB and `.wslconfig` is no longer load-bearing.
 
 ### 1.5 LLM layer (tiers & budget)
 
@@ -332,7 +336,7 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 
 | # | Scope | Hand-off (read) | Acceptance |
 |---|---|---|---|
-| **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; `.wslconfig` 28 GB; Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) |
+| **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; native-host preflight (RAM/GPU/Ollama/Chromium); Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) |
 | **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean |
 | **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | - | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
 | **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, account signup + verification via the worker | - | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
@@ -340,6 +344,15 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 | **G5** | **Workday apply channel** (workstream W): identities, onboarding, browser apply, multi-identity | **H1b -> `plan-workday.md` sections 11-13** (`G5-W1..W3`) | `--dry-run` reaches Review with 0 manual inputs; then 20 apps / 3 tenants, no duplicate req |
 | **G6** | **Autonomy + hardening**: scheduler caps, identity rotation, canary, cost report, prune/backup, runbook | **H2 <- `plan-workday.md` section 12** | 7-day unattended soak; quota never exceeded; zero duplicate applications; attribution accuracy >= 95% |
 | *(deferred)* | *Email as a submission channel* | *Appendix B - not scheduled* | *-* |
+
+**G0 status — met, and re-verified on the native Windows host (2026-10-11).** Evidence:
+`jobagent doctor` exits 0 (`all checks passed`, 1 WARN: `AGENT_TOKEN` unset by design), `uv run
+pytest -q` = 28 passed, Patchright chromium 153 launches headless, GPU + models reachable (ollama
+answering was still the WSL `0.16.1` - the native build is installed but blocked on the port,
+section 13 item 5),
+DeepSeek balance $6.85 vs $3.00/day cap. Offline `uv 0.11.7`, `git 2.55.0.windows` and Ollama are
+per-user installs (no admin). MR: `fix/windows-native-host`. Re-verification was needed because the
+move off WSL changed the memory probe, the console and the Ollama topology (sections 1.4, 12).
 
 ### 11.1 Gates (the seam in detail)
 
@@ -362,6 +375,9 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 | Expectation risk: nothing here bypasses an ATS | section 7 ladder + measure response rate per channel and re-weight `score_prior` from real data |
 | Workers Free-plan CPU limits | Workers Paid; keep handlers thin; heavy parsing stays in the agent |
 | Two-repo confusion (Python agent vs TS worker) | worker stays in `my-email-worker`; contract in `AGENT_ONBOARDING.md`; agent talks HTTP only |
+| Rich output dies on the Windows ANSI code page whenever it is captured (`jobagent doctor \| tail`, CI, log file) | `make_console()`: UTF-8 streams + no Rich legacy-Windows path; regression test in `tests/test_checks.py` |
+| A WSL-republished port shadows the native stack (observed: `wslrelay` holding 11434, blocking native Ollama and serving `0.16.1` to Windows clients instead) | retire the WSL Ollama systemd unit and confirm `/api/version` reports the native build before a run (section 13); keep only one Ollama per host |
+| WSL is retired but surprises remain in the docs/toolchain (`wsl --shutdown`, `.wslconfig`, Linux-only probes) | `doctor` is host-agnostic with a Windows branch (section 1.4); plan/workstream/AGENTS docs updated in the same MR; WSL stays only as a legacy checkout |
 
 ## 13. Human actions
 
@@ -369,13 +385,13 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 2. Approve the **canonical contact address** (the one that appears on applications and resumes) - default `favourotiger@toesk.uk`.
 3. Confirm **Workers Paid** (Free-plan CPU limits can drop email handlers).
 4. **Proxy creds** for the web channels (sticky, one per identity) - until supplied, `tenant_concurrency_cap = 1`.
-5. **Run `wsl --shutdown` from Windows** after `.wslconfig` (28 GB) is written at G0; it cannot be run from inside WSL.
+5. ~~Run `wsl --shutdown` from Windows after `.wslconfig` (28 GB) is written at G0~~ - **superseded by the move to a native Windows host**: `.wslconfig` is no longer load-bearing (section 1.4). Instead **retire the WSL Ollama service** - `sudo systemctl disable --now ollama` from inside WSL (the unit is `enabled`, so it comes back on every WSL start and re-squats `127.0.0.1:11434`) - then confirm `jobagent doctor` reports the native Ollama version.
 6. **HAR captures** for each web-form channel (DevTools -> Network -> Preserve log -> complete one real application on a target tenant) -> `artifacts/har/`. Workday's is `G0-W`.
 7. Optional but useful: an initial **target company list** to seed G1/G3.
 8. *Deferred:* rotate the DeepSeek key and `AGENT_TOKEN`; onboard a sending subdomain if Appendix B is ever taken up.
 ## 14. Appendix A - verified vs assumed
 
-**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B).
+**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B). **After the move to a native Windows host (2026-10-11):** the host itself - native Ollama 0.40.3 on `127.0.0.1:11434`, 31.1 GB RAM, `C:` free space, Patchright chromium 153 headless launch, winget per-user installs, and the `wslrelay` port-squatting behaviour in section 1.4.
 
 **Assumed / to verify** (owner = which doc resolves it):
 

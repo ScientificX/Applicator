@@ -1,0 +1,13 @@
+# Line endings: the repo is authored on Windows and Linux/WSL hosts (AGENTS.md section 7).
+* text=auto eol=lf
+
+# Binary formats - never subject to eol conversion.
+*.db binary
+*.db-journal binary
+*.sqlite3 binary
+*.har binary
+*.png binary
+*.pdf binary
+*.docx binary
+*.zip binary
+*.whl binary

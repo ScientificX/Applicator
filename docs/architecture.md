@@ -119,7 +119,7 @@ Layer responsibilities (concern -> module -> owning plan section):
 
 | Pipeline stage | Program stage | Module (planned) | Key output rows |
 |---|---|---|---|
-| (scaffold + doctor) | **G0** | `config.py`, `db.py`, `checks.py`, `cli.py` | schema, `.wslconfig` |
+| (scaffold + doctor) | **G0** | `config.py`, `db.py`, `checks.py`, `cli.py` | schema, host preflight |
 | hunt | **G1** | `discover/` (`DiscoverySource`, `TenantSource` impls) | `sources`, `companies`, `postings`, `tenants`, `tenant_probes`, `shards` |
 | rank + tailor | **G2** | `match/`, `tailor/` | `matches`, `resumes` |
 | execute (non-Workday) | **G3** | `apply/`, `channels.py`, `mail/` | `applications`, `aliases`, `messages` |
@@ -187,7 +187,13 @@ source poll -> postings -> title_gate/visa -> matches -> resume -> resumes
   all durable state lives in SQLite + `state/` + `artifacts/`.
 - **Stage-split scheduler.** Ollama-hot batches (classification/normalisation) run separately
   from browser-hot batches, with `OLLAMA_KEEP_ALIVE=0` before browser work, so a 16 GB GPU and
-  ~28 GB WSL RAM are not contended (`plan-workday.md` §16).
+  the host's 31 GB of RAM are not contended (`plan-workday.md` §16).
+- **One host, one `localhost`.** The agent, Chromium and - once the WSL Ollama unit is retired -
+  Ollama all run natively on the Windows host, so `OLLAMA_BASE=http://localhost:11434` needs no
+  host-IP lookup and no WSL boundary crossing. Until that unit goes, WSL's relay owns port 11434
+  and the native server has to run on an alternate port. This is deliberate: a service running
+  *inside* WSL is republished by WSL's `wslrelay.exe` on the Windows side, which both shadows the
+  port for Windows clients and blocks a native process from binding it (`plan-general.md` §1.4).
 - **Pacing and concurrency.** Per-host politeness (1-2 concurrent, jitter), per-identity daily
   caps, per-tenant `tenant_concurrency_cap` (forced to 1 while no proxy pool exists), and a
   global politeness budget.
@@ -237,7 +243,7 @@ go through `plan-general.md` first.
 | **Freshness** | new postings detected <= 60 min after posting; recency-first scheduling |
 | **Cost** | < $0.01 per application; per-run <= $1.00, per-day <= $3.00 (hard caps) |
 | **Throughput** | >= 80% submit rate; >= 20 live Workday tenants auto-discovered |
-| **Runtime platform** | Linux/WSL on one host; RTX 5060 Ti 16 GB (sm_120 -> Ollama-only for GPU); WSL RAM raised to ~28 GB; Workers Paid for the mail handler |
+| **Runtime platform** | Native **Windows 11** on one host (agent + Ollama + Chromium on one `localhost`); RTX 5060 Ti 16 GB (sm_120 -> Ollama-only for GPU); 31 GB RAM; Workers Paid for the mail handler. Host-agnostic code: WSL is detected, not assumed |
 | **Portability** | `doctor` passes on a machine with blank secrets (network checks degrade to WARN) |
 | **Auditability** | every shipped resume has `tailor_report.json`; every application has an `events` trail |
 

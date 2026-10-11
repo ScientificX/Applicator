@@ -236,6 +236,15 @@ CHECKS: tuple[Callable[[Settings], Check], ...]
 def run_all(s: Settings) -> list[Check]     # catches exceptions -> FAIL, never raises
 ```
 
+Host probes — `doctor` must run on the Windows host *and* on WSL, so the OS is detected rather
+than assumed, and a dead probe degrades to WARN instead of raising:
+
+```python
+def _is_wsl() -> bool                 # "microsoft" in /proc/version (False off Linux)
+def _total_ram_gb() -> float          # GlobalMemoryStatusEx on win32 | MemTotal on POSIX
+RAM_FLOOR_GB: float = 20.0            # WARN threshold; architecture.md section 7 headroom
+```
+
 | Check | PASS when | Notes |
 |---|---|---|
 | `check_python` | `sys.version_info` is 3.13 | else WARN |
@@ -243,7 +252,7 @@ def run_all(s: Settings) -> list[Check]     # catches exceptions -> FAIL, never 
 | `check_config` | all five `config/*.yaml` parse | reports pattern/skill counts; pools=0 -> concurrency 1 |
 | `check_address` | `jobagent_contact_address` set, no `+` | FAIL otherwise |
 | `check_db` | connect + migrate succeed | reports schema version + table count |
-| `check_memory` | WSL MemTotal >= 20 GB or `/mnt/c/Users/favou/.wslconfig` present | else WARN |
+| `check_memory` | RAM probe succeeds and reports >= `RAM_FLOOR_GB` (20 GB) | `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on POSIX; on WSL it also reports the host's `.wslconfig`; a probe failure is a WARN, never a raise |
 | `check_gpu` | `nvidia-smi` works | WARN if absent; notes sm_120 |
 | `check_ollama` | reachable; embed model present | WARN if `bge-m3` missing |
 | `check_browser` | Patchright imports and launches headless Chromium | FAIL with install hint |
@@ -279,6 +288,20 @@ Built with **Typer** + **Rich**. Two sub-apps: `config`, `db`. Global `--version
 **Contract:** when a stage is implemented, its `_stub("<stage>")` call is replaced by the real
 implementation and the command's options are added to this table. Stubs must keep exiting 2 so
 scripts can detect "not implemented yet".
+
+**Console contract.** The module-level `console` is built by `make_console()` so every command's
+output survives the Windows host:
+
+```python
+def make_console() -> Console        # win32: UTF-8 streams + Rich legacy_windows=False
+                                     # else:  Console()
+```
+
+On `win32` it reconfigures `sys.stdout`/`sys.stderr` to UTF-8 and refuses Rich's legacy-Windows
+render path. Both guards are required: Windows Python encodes a captured stream with the ANSI
+code page, and Rich's legacy path (`_win32_console.WindowsConsole`) encodes table glyphs with
+that code page regardless of the stream's own encoding — which made `jobagent doctor | tail`
+(and any CI or log capture) die with `UnicodeEncodeError` while it printed fine interactively.
 
 ## 7. Planned protocols (pinned names, proposed signatures)
 
@@ -631,8 +654,11 @@ than silently downgrading. Caps come from `Settings.jobagent_max_cost_per_run_us
 ## 13. Testing contract
 
 - Runner: `uv run pytest -q` (config in `pyproject.toml`: `testpaths = ["tests"]`).
-- One module per concern: `tests/test_<module>.py`. The only shipping gate today is
-  `tests/test_filters.py`.
+- One module per concern: `tests/test_<module>.py`. Shipping gates today: `tests/test_filters.py`
+  (title gate) and `tests/test_checks.py` (`doctor`'s platform probes + the console).
+- Platform-specific code is exercised on the host that owns the branch
+  (`sys.platform == "win32"` + `pytest.skip` elsewhere), so the suite stays green on Windows and
+  on WSL — `doctor` is documented to work on both.
 - Prefer **table-driven** tests (`@pytest.mark.parametrize`) for gate/filter/normaliser logic.
 - Test against the **real** loaded config (`load_criteria()`), not a copy — an intentional edit
   that flips a case must surface, not be masked.

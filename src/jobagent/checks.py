@@ -2,11 +2,16 @@
 
 Every check returns a Check(name, status, detail). Statuses: OK | WARN | FAIL | SKIP.
 WARN never fails the run (e.g. a model not yet pulled); FAIL does.
+
+Host-agnostic: the runtime platform is the Windows host (docs/architecture.md section 10);
+WSL is *detected*, never assumed. A check must never raise (design.md section 5), so the
+platform probes below degrade to WARN instead of crashing doctor.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,8 +32,8 @@ from .config import (
 )
 
 OK, WARN, FAIL, SKIP = "OK", "WARN", "FAIL", "SKIP"
-WSL_CONFIG = Path("/mnt/c/Users/favou/.wslconfig")
 _HTTP = 15.0
+RAM_FLOOR_GB = 20.0  # below this the stage-split scheduler (architecture.md section 7) has no headroom
 
 
 @dataclass(frozen=True)
@@ -98,19 +103,67 @@ def check_db(s: Settings) -> Check:
     return Check("database", OK, f"schema v{version}, {n} tables at {s.db_path}")
 
 
-def check_memory(s: Settings) -> Check:
-    total_kb = 0
+def _is_wsl() -> bool:
+    """True when this interpreter runs inside WSL (a Microsoft kernel is visible)."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def _total_ram_gb() -> float:
+    """Physical RAM in GB: GlobalMemoryStatusEx on Windows, /proc/meminfo otherwise.
+
+    Reading /proc/meminfo unconditionally is what broke doctor on the Windows host.
+    """
+    if sys.platform == "win32":
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(MemoryStatusEx)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            raise OSError("GlobalMemoryStatusEx failed")
+        return status.ullTotalPhys / 1024**3
+
     for line in Path("/proc/meminfo").read_text().splitlines():
         if line.startswith("MemTotal"):
-            total_kb = int(line.split()[1])
-            break
-    gb = total_kb / 1024 / 1024
-    configured = WSL_CONFIG.exists()
-    detail = f"WSL MemTotal {gb:.1f} GB; .wslconfig {'present' if configured else 'MISSING'}"
-    if gb < 20 and not configured:
-        return Check("memory", WARN, detail + " -> run: wsl --shutdown (from Windows) once .wslconfig is in place")
-    if gb < 20:
-        return Check("memory", WARN, detail + " -> .wslconfig written but not applied yet: run wsl --shutdown from Windows")
+            return int(line.split()[1]) / 1024 / 1024
+    raise OSError("MemTotal not found in /proc/meminfo")
+
+
+def check_memory(s: Settings) -> Check:
+    try:
+        gb = _total_ram_gb()
+    except Exception as exc:
+        return Check("memory", WARN, f"RAM probe unavailable ({type(exc).__name__}: {exc})")
+
+    if _is_wsl():
+        # The WSL VM only sees the RAM .wslconfig grants it, not the host's total.
+        caps = sorted(Path("/mnt/c/Users").glob("*/.wslconfig"))
+        detail = f"WSL sees {gb:.1f} GB; .wslconfig {'present' if caps else 'MISSING'}"
+        if gb < RAM_FLOOR_GB and not caps:
+            return Check("memory", WARN, detail + " -> run: wsl --shutdown (from Windows) once .wslconfig is in place")
+        if gb < RAM_FLOOR_GB:
+            return Check("memory", WARN, detail + " -> .wslconfig written but not applied yet: run wsl --shutdown from Windows")
+        return Check("memory", OK, detail)
+
+    detail = f"{gb:.1f} GB physical RAM (host is the runtime platform)"
+    if gb < RAM_FLOOR_GB:
+        return Check("memory", WARN, detail + f" -> below the {RAM_FLOOR_GB:.0f} GB the stage-split scheduler assumes")
     return Check("memory", OK, detail)
 
 
