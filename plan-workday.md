@@ -53,7 +53,7 @@ at the gates below.
 | Drift canary | `errorCaseId` is unique per request -> alert if the error envelope changes |
 | DNS | `*.wdN.myworkdayjobs.com` wildcard resolves for **any** slug (incl. bogus); `wd11` = NXDOMAIN -> shard set enumerable, tenant existence only via `cxs` |
 | Root `/` | 406 with 0 bytes even with a full Chrome UA -> HTML paths need `curl_cffi impersonate="chrome"` |
-| Job detail, apply flow | [?] **VERIFY from HAR at M0** - the only remaining unknown |
+| Job detail, apply flow | [?] **VERIFY from HAR at `G0-W`** - the only remaining unknown |
 | DeepSeek | `deepseek-flash` = V4.1-Flash: **1,048,576 ctx**, 393,216 max out, **text+image** input, `effort: low|high|max` (default high). `deepseek-v4-pro` exists (text-only). `deepseek-chat` is an alias -> **pin literal ids** |
 | DeepSeek JSON | `response_format={"type":"json_object"}` [V], round trip **0.715 s** |
 | Prompt cache | usage exposes `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `prompt_tokens_details.cached_tokens` -> prefix caching is measurable |

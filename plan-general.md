@@ -323,7 +323,7 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 - `events(id, application_id, kind, payload, ts)`
 - `suppressions(address, reason, added_at)`
 - **Channel extensions** (declared here so there is one model): `tenants(id, host, tenant, site, wd_shard, locale, status, source, verified_at, facet_counts, matched_req_count)` - `tenant_probes(slug, shard, site_guess, http_status, error_code, checked_at)` *(negative cache)* - `shards(host_suffix, resolves, last_checked)` - `answers(tenant_id, question_hash, question_text, answer, source, uses)` *(question->answer cache, tenant-scoped, shared by every web-form channel)*
-- **Naming canon:** `postings` (never `jobs`), `applications`, `messages`, `events` (never `funnel`), `aliases(address, role)` - an address never carries attribution (section 6).
+- **Naming canon:** `postings` (never `jobs`), `applications`, `messages`, `events` (the funnel is a *view over events*, never its own table), `aliases(address, role)` - an address never carries attribution (section 6).
 
 ## 11. Milestones
 
