@@ -1,8 +1,13 @@
-# job-agent - Implementation Plan (v4)
+# job-agent - Workday Channel Plan (v4)
+
+> **Scope: this is the Workday channel deep-dive, not the whole system.** The umbrella plan for the
+> generalised multi-channel agent (hunt -> rank -> tailor -> route -> execute -> track -> learn) is
+> [`plan-general.md`](plan-general.md). This file is the reference implementation of the
+> web-form/ATS channel plus the `cxs` tenant-discovery mechanism.
 
 Autonomous Workday application agent: hybrid `cxs` API discovery + persistent-identity browser apply + Cloudflare mail-worker onboarding.
 
-- **Project root:** `/home/favou/.cline/data/workspaces/chat/job-agent`
+- **Project root:** `/home/favou/development/job-agent` (repo root; sibling of `my-email-worker`)
 - **Status:** design closed. `[V]` = verified empirically during planning. `[?]` = still to verify (needs HAR).
 - **Stack:** Python 3.13 (`uv`) - Patchright - curl_cffi - Ollama (local) - DeepSeek `deepseek-flash` (cloud)
 
