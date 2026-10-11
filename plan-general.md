@@ -1,11 +1,37 @@
-# job-agent - Generalised Plan (v5.1)
+# job-agent - Generalised Plan (v5.4)
 
-Umbrella plan for a multi-channel, multi-ATS autonomous job application agent.
+**Doc set `PS-5.4`** - the program. Umbrella plan for a multi-channel, multi-ATS autonomous job application agent.
 
 - **Project root:** `/home/favou/development/job-agent`
-- **Companion docs:** [`plan.md`](plan.md) - Workday channel + `cxs` discovery deep-dive; `../my-email-worker/AGENT_ONBOARDING.md` - mail service contract
+- **Entry point:** [`README.md`](README.md) - start there. Workstream doc: [`plan-workday.md`](plan-workday.md); mail contract: `../my-email-worker/AGENT_ONBOARDING.md`
 - **Status:** design + verified facts. Nothing scaffolded yet. `[V]` = verified, `[?]` = to verify.
 - **Stack:** Python 3.13 (`uv`) - DeepSeek `deepseek-flash` (cloud) - Ollama (local) - Patchright / curl_cffi (web apply) - Cloudflare Email Service (**inbound only, for now**)
+
+## START HERE
+
+**Begin at G0**: `uv` scaffold, `config/`, DB migrations, CLI skeleton, `doctor`, `.wslconfig`,
+Ollama tuning + `bge-m3`.
+
+### Doc roles
+
+| Doc | Role | Open it when |
+|---|---|---|
+| `plan-general.md` | the program - authoritative for anything cross-channel | always; start here |
+| `plan-workday.md` | workstream W - the Workday channel implementation | only at the gates below |
+
+### Stage router (the seam)
+
+| Stage | What | Gate | Then read |
+|---|---|---|---|
+| G0 | scaffold + `doctor` | - | this doc |
+| G1 | hunt layer | **H1a** discovery seam | `plan-workday.md` sections 6-7 (`WorkdayCxsDiscovery`, `WorkdayTenantDiscovery`) |
+| G2 | rank + tailor | - | this doc sections 2.1, 4, 5 |
+| G3 | first submission, non-Workday ATS | - | this doc sections 3, 6, 9 |
+| G4 | inbound analytics | - | this doc sections 6.2, 6.3 |
+| G5 | Workday apply | **H1b** apply seam | `plan-workday.md` sections 11-13 (`WorkdayWebApply`) |
+| G6 | autonomy + hardening | **H2** return | `plan-workday.md` section 12 |
+
+**Conflict rule:** if a workstream doc contradicts this one, this one wins and the other gets fixed.
 
 > **Revision note (v5.1).** v5 wrongly promoted *outbound* email to a submission channel. The confirmed
 > reading of "send an application in using the worker email service" is that the worker supplies the
@@ -19,7 +45,23 @@ Umbrella plan for a multi-channel, multi-ATS autonomous job application agent.
 
 **Out (v1):** applying *by* email as a submission channel (Appendix B), interview prep/scheduling, offer negotiation, mass LinkedIn DM automation.
 
-Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**. `plan.md` is the deep-dive for one channel (Workday web-form) plus the `cxs` tenant-discovery mechanism; this file is the whole system.
+Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**. `plan-workday.md` is the deep-dive for one channel (Workday web-form) plus the `cxs` tenant-discovery mechanism; this file is the whole system.
+
+### 0.1 Ownership (who owns what)
+
+| Concern | Owner | Workstream doc says |
+|---|---|---|
+| Scope, funnel, success metrics | **general sections 0-2** | pointer |
+| Criteria + comp + visa/sponsorship | **general 2.1-2.2** | pointer |
+| Channels + selection policy | **general 3** | Workday = one `ApplyChannel` impl |
+| Sources / hunt / freshness | **general 4** | Workday = one `DiscoverySource` + `TenantSource` impl |
+| Tailoring + anti-exaggeration gates | **general 5** | pointer |
+| LLM tiers + budget | **general 1.5** | pointer |
+| Email identity + attribution + etiquette | **general 6** | pointer; Workday keeps only its onboarding state machine |
+| Identity / proxies / rotation policy | **general 8** | pointer |
+| Data model (canonical) | **general 10** | extensions only |
+| Milestones, gates, risks, human actions, `[?]` register | **general 11-14** | pointer |
+| `cxs` endpoints, oracle, shards, apply state machine, selectors, HAR fixtures | **plan-workday.md 1, 6-7, 12** | referenced from general 4 and 11 |
 
 ## 1. Verified facts
 
@@ -42,13 +84,39 @@ Inbound limits that matter: 25 MiB message size; 200 routing rules per domain; 2
 
 Researched, verified, and **not needed for v1**. Kept because it is a real future option: `send_email` binding -> `env.EMAIL.send(...)` -> `{messageId}`; **arbitrary recipients once a sending domain is onboarded**; "you can only send from your routing domains"; 50 recipients/msg; 5 MiB message size; reputation-scaled per-account daily quota; suppression-list API; hard-bounce handling; **Worker sends appear as "dropped" in the Email Routing summary even when delivered** (use Email *sending* metrics/logs). Full detail in Appendix B.
 
-### 1.3 Workday `cxs` (see `plan.md`) [V]
+### 1.3 Workday `cxs` (see `plan-workday.md`) [V]
 
 `POST /wday/cxs/{tenant}/{site}/jobs`, `limit <= 20`, no auth/CSRF, response `{total, jobPostings[], facets[]}`; `total` caps at 2000 so size tenants by `facets`. Discovery oracle: **200** valid / **404 `S21`** = tenant real but site slug wrong / **422** = no such tenant. `*.wdN` wildcard resolves for any slug (DNS is not a validity test). Root `/` returns 406.
 
 ### 1.4 LLM + hardware [V]
 
 `deepseek-flash` (1M ctx, text+**image**, JSON mode verified, prompt-cache counters exposed, $7.54 balance), `deepseek-v4-pro` for escalation. Local: Ollama 0.16.1, `qwen3:8b` present, `bge-m3` to pull; RTX 5060 Ti 16 GB (sm_120 -> Ollama-only for GPU), WSL RAM 15.9 GB (raise to 28 GB).
+
+### 1.5 LLM layer (tiers & budget)
+
+| Role | Model | Why |
+|---|---|---|
+| JD->requirements, resume rewrite | `deepseek-flash` (`effort: low` for extraction) | verified JSON mode, 0.71 s, 1M ctx, cache counters |
+| Hard cases only | `deepseek-v4-pro` | text-only escalation |
+| Vision fallback for unknown web-form fields | `deepseek-flash` (**image input**) | one provider for text + vision |
+| Classification, question normalisation, answer-cache misses | local `qwen3:14b` / `qwen3:8b` | thousands of tiny calls; free, no rate limit |
+| Offline prompt/schema iteration + tests | local | zero API cost, CI-safe |
+| Failover on 429/outage | local `qwen3:14b` | keeps runs alive |
+| Embeddings | Ollama `bge-m3` (fallback `nomic-embed-text`, or `fastembed` CPU) | sm_120 makes Python CUDA wheels fragile; Ollama ships a compatible runtime |
+
+Wiring is config, not code (Ollama speaks OpenAI at `/v1`):
+
+```yaml
+llm:
+  primary:  { provider: deepseek,          base_url: https://api.deepseek.com, model: deepseek-flash }
+  escalate: { provider: deepseek,          base_url: https://api.deepseek.com, model: deepseek-v4-pro }
+  classify: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: qwen3:14b }
+  failover: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: qwen3:8b }
+embeddings: { provider: openai_compatible, base_url: http://localhost:11434/v1, model: bge-m3 }
+budget: { max_cost_per_run_usd: 1.00, max_cost_per_day_usd: 3.00 }   # balance is $7.54
+```
+
+`cost.py` reads `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `cached_tokens`; every structured output is pydantic-validated with one retry then a deterministic fallback.
 
 ## 2. Objective & funnel
 
@@ -63,6 +131,46 @@ Researched, verified, and **not needed for v1**. Kept because it is a real futur
 | **Learn** | feed response rate per channel/company/source back into Route and Rank |
 
 **Headline metric: response rate per channel and per source** - measured from inbound ATS mail, not guessed. Supporting: apps/day, cost/app, time-to-apply after posting, zero duplicate applications, **company-level attribution rate**, **application-level attribution rate**, unattributed rate.
+
+### 2.1 Criteria (target profile) - `config/criteria.yaml`
+
+System-wide, not channel-specific.
+
+```yaml
+target:
+  seniority: [mid, senior]                       # "AVP-ish" IC
+  title_include: ['\bAVP\b','Assistant Vice President','Senior Software Engineer',
+                  'Backend Engineer','Java Engineer','Software Engineer (III|IV)','Lead Engineer']
+  title_exclude: ['Intern','Graduate','Analyst','Associate','Principal','Director','\bVP\b','Manager']
+  stack_must: ['Java','Spring','microservices','REST','SQL']
+  stack_nice: ['Kafka','Kubernetes','Docker','AWS','Azure','GCP','Terraform','low.?latency',
+               'distributed','JUnit','Mockito','CI/CD','observability']
+  domain_nice: ['bank','financial services','payments','trading','fintech','capital markets']
+  locations:
+    preferred: ['Dublin','Ireland']                   # tier 1
+    next:      ['London','United Kingdom']            # tier 2
+    also:      ['Remote','EMEA Remote','EU Remote']   # tier 3
+  comp: { IE_min_eur: 70000, UK_min_gbp: 75000, remote_min_eur: 70000 }
+  top_k_per_run: 25
+```
+
+### 2.2 Visa / right-to-work - `config/visa.yaml`, enforced by `match/visa.py`
+
+```yaml
+visa:
+  right_to_work: { IE: none, default: sponsorship_required }
+  jd_filter:
+    exclude_if: ['no sponsorship','unable to sponsor','must already have the right to work',
+                 'we do not (provide|offer) visa','no visa sponsorship']
+    boost_if:   ['visa sponsorship (is )?available','we (do )?sponsor','sponsorship provided',
+                 'relocation support']
+  answers:                       # country-scoped; seeded into the answer cache pre-LLM
+    IE:      { require_sponsorship: 'No',  right_to_work: 'Yes' }
+    GB:      { require_sponsorship: 'Yes', right_to_work: 'No' }
+    default: { require_sponsorship: 'Yes' }
+```
+
+Country is inferred from job location/tenant, so IE and UK answers can never cross-contaminate. Ranking penalty for `exclude_if`, boost for `boost_if`. `matches` stores `visa_decision` for auditability.
 
 ## 3. Channels
 
@@ -86,7 +194,7 @@ Email is *not* in the policy. The decision and its reason are persisted on the a
 
 | Family | Mechanism | Notes |
 |---|---|---|
-| Workday | `POST /wday/cxs/{tenant}/{site}/jobs` + oracle | see `plan.md`; shard + slug discovery |
+| Workday | `POST /wday/cxs/{tenant}/{site}/jobs` + oracle | see `plan-workday.md`; shard + slug discovery |
 | Greenhouse | `boards-api.greenhouse.io/v1/boards/{t}/jobs?content=true` | documented read API |
 | Lever | `api.lever.co/v0/postings/{co}?mode=json` | documented; carries `applyUrl` |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{org}` | documented |
@@ -105,7 +213,7 @@ Crawl politeness: 1-2 concurrent per host, jitter, conditional requests, negativ
 
 ## 5. Resume tailoring (shared by every channel)
 
-As `plan.md` section 9, with the anti-exaggeration gate made explicit:
+As `plan-workday.md` section 9, with the anti-exaggeration gate made explicit:
 
 - The master profile holds atomic, tagged, metric-bearing bullets. **Nothing enters a resume that is not in the master profile.**
 - Permitted operations: **SELECT, REORDER, REPHRASE, EMPHASISE** (mirror the JD's literal keywords), **TRIM**.
@@ -201,7 +309,7 @@ Nothing here requires sending mail. The email channel is a *tactic*, not a prere
 
 ## 10. Data model (agent side)
 
-Supersedes `plan.md` section 14 where they differ:
+Canonical model for the whole system. The workstream doc declares **extensions only** (naming canon at the end of this section).
 
 - `sources(id, family, config, last_polled)`
 - `companies(id, name, domain, ats_family, tenant, site, allow_email_tier)`
@@ -214,20 +322,29 @@ Supersedes `plan.md` section 14 where they differ:
 - `web_identities(id, ats_family, label, proxy_ref, status, daily_cap, fail_streak, profile_dir)`
 - `events(id, application_id, kind, payload, ts)`
 - `suppressions(address, reason, added_at)`
+- **Channel extensions** (declared here so there is one model): `tenants(id, host, tenant, site, wd_shard, locale, status, source, verified_at, facet_counts, matched_req_count)` - `tenant_probes(slug, shard, site_guess, http_status, error_code, checked_at)` *(negative cache)* - `shards(host_suffix, resolves, last_checked)` - `answers(tenant_id, question_hash, question_text, answer, source, uses)` *(question->answer cache, tenant-scoped, shared by every web-form channel)*
+- **Naming canon:** `postings` (never `jobs`), `applications`, `messages`, `events` (never `funnel`), `aliases(address, role)` - an address never carries attribution (section 6).
 
 ## 11. Milestones
 
-| # | Scope | Acceptance |
-|---|---|---|
-| **G0** | Repo scaffold (uv, py3.13), config, migrations, CLI, `doctor`; `.wslconfig` 28 GB; Ollama tuned + `bge-m3` | `doctor` green |
-| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | new postings detected <= 60 min after posting; dedupe clean |
-| **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
-| **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, ATS account signup + verification through the worker, inbound ack attributed back to the application | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
-| **G4** | **Inbound analytics**: two-tier attribution (company, then application), classification, response-rate report per channel/company/source | report matches a manual spot-check of 20 applications; company-level attribution >= 95%; application-level target >= 80%, remainder explicitly `low`/review |
-| **G5** | **Workday channel** (`plan.md` M1a-M6) as the web-form reference | see `plan.md` acceptance rows |
-| **G6** | **Autonomy + hardening**: scheduler caps, identity rotation, canary, cost report, prune/backup, runbook | 7-day unattended soak; zero duplicate applications; attribution accuracy >= 95% |
-| *(deferred)* | *Email as a submission channel* | *Appendix B - not scheduled* |
+| # | Scope | Hand-off (read) | Acceptance |
+|---|---|---|---|
+| **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; `.wslconfig` 28 GB; Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) |
+| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean |
+| **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | - | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
+| **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, account signup + verification via the worker | - | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
+| **G4** | **Inbound analytics**: two-tier attribution (company, then application), classification, response-rate report | - | report matches a manual spot-check of 20 applications; company-level >= 95%; application-level target >= 80% |
+| **G5** | **Workday apply channel** (workstream W): identities, onboarding, browser apply, multi-identity | **H1b -> `plan-workday.md` sections 11-13** (`G5-W1..W3`) | `--dry-run` reaches Review with 0 manual inputs; then 20 apps / 3 tenants, no duplicate req |
+| **G6** | **Autonomy + hardening**: scheduler caps, identity rotation, canary, cost report, prune/backup, runbook | **H2 <- `plan-workday.md` section 12** | 7-day unattended soak; quota never exceeded; zero duplicate applications; attribution accuracy >= 95% |
+| *(deferred)* | *Email as a submission channel* | *Appendix B - not scheduled* | *-* |
 
+### 11.1 Gates (the seam in detail)
+
+**H1a - discovery seam (enters G1).** Workday discovery lands first because it is cheap: no browser, no accounts, no mail. *Preconditions:* the general `DiscoverySource` protocol plus `postings` / `companies` / `tenant_probes` / `shards` migrations are landed, and the `curl_cffi` client wrapper exists. *Exit:* `WorkdayCxsDiscovery` and `WorkdayTenantDiscovery` pass their acceptance rows, and the hunt layer consumes them through the protocol with no Workday-specific branches.
+
+**H1b - apply seam (enters G5).** *Preconditions:* G3 proven end to end on a non-Workday channel; attribution working on real mail **including at least one Workday ack** (tier 1 at minimum); the address model live; per-identity proxies assigned; **HAR captured**; `doctor` green; budget caps in place. *Exit:* `WorkdayWebApply` satisfies the `ApplyChannel` protocol; `--dry-run` reaches Review with zero manual inputs; parks are first-class outcomes rather than errors.
+
+**H2 - return seam (G4/G6).** Workstream output feeds back: submit / park / unattributed rates into section 2, Workday quirks and drift signatures into section 12, the captured HAR into recorded fixtures for the canary, and any newly-verified `cxs` behaviour into this doc section 1.
 ## 12. Risks -> mitigations
 
 | Risk | Mitigation |
@@ -247,22 +364,27 @@ Supersedes `plan.md` section 14 where they differ:
 
 1. ~~Confirm the catch-all~~ - **done**: catch-all confirmed on `toesk.uk`.
 2. Approve the **canonical contact address** (the one that appears on applications and resumes) - default `favourotiger@toesk.uk`.
-3. Confirm **Workers Paid** (Free-plan CPU limits can drop mail handlers).
-4. **Proxy creds** for the web channels.
-5. Optional but useful: an initial **target company list** to seed G1/G3.
-6. *(Only if Appendix B is taken up later)* onboard a sending subdomain with SPF/DKIM/DMARC.
-
+3. Confirm **Workers Paid** (Free-plan CPU limits can drop email handlers).
+4. **Proxy creds** for the web channels (sticky, one per identity) - until supplied, `tenant_concurrency_cap = 1`.
+5. **Run `wsl --shutdown` from Windows** after `.wslconfig` (28 GB) is written at G0; it cannot be run from inside WSL.
+6. **HAR captures** for each web-form channel (DevTools -> Network -> Preserve log -> complete one real application on a target tenant) -> `artifacts/har/`. Workday's is `G0-W`.
+7. Optional but useful: an initial **target company list** to seed G1/G3.
+8. *Deferred:* rotate the DeepSeek key and `AGENT_TOKEN`; onboard a sending subdomain if Appendix B is ever taken up.
 ## 14. Appendix A - verified vs assumed
 
 **Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B).
 
-**Assumed / to verify:**
-- Whether ATS **bodies** reliably name the role/req id - the Citi sample suggests the subject often will not. Measured in G4 by the application-level attribution rate; the design degrades to portal-link parsing and time windows rather than guessing (`[?]`).
-- How ATS spam heuristics weight aliased vs plain addresses (`[?]` - moot for attribution now; the single stable address removes the variable anyway).
-- Non-Workday ATS apply endpoints (Greenhouse/Ashby apply POSTs are undocumented internals, same as Workday - `[?]` verify by HAR).
-- Whether ATS status mail consistently includes a req id/title that lets us disambiguate several applications at the same company (`[?]` - fall back to `submitted_at` window matching).
-- The account's numeric daily **sending** quota (only relevant to Appendix B).
+**Assumed / to verify** (owner = which doc resolves it):
 
+| `[?]` | Owner | How it resolves |
+|---|---|---|
+| Do ATS **bodies** reliably name the role/req id? The Citi ack suggests subjects often will not | general | measured in G4 by the application-level attribution rate; degrades to link parsing + time windows |
+| Do ATS subjects/senders consistently expose the **company**? | general | measured in G3 (target 100% company-level) |
+| ATS spam heuristics vs aliased vs plain addresses | general | moot for attribution now - the single stable address removes the variable |
+| Non-Workday ATS apply endpoints (Greenhouse/Ashby apply POSTs are undocumented internals) | general | HAR per channel |
+| Workday job-detail and apply-flow endpoints | `plan-workday.md` | HAR at `G0-W` |
+| Does `curl_cffi impersonate="chrome"` clear the Workday landing-page 406? | `plan-workday.md` | probe at `G1-W1` |
+| Account daily **sending** quota, Message-ID exposure, header permissions | general | only relevant if Appendix B is taken up |
 ## 15. Appendix B - DEFERRED OPTION: email as a submission channel
 
 Not scheduled. Kept because the capability is verified, real, and occasionally the *only* path (agencies, small firms with no ATS, postings that literally say "email your resume"). Do **not** build this before G1-G4 pay off on the primary channels.
