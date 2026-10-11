@@ -1,0 +1,26 @@
+# Tenants (Workday and other ATS boards).
+#
+# plan-general.md section 6 / plan-workday.md sections 6-7 populate this automatically at
+# G1-W1 through the cxs oracle (200 = valid, 404 S21 = tenant real but site slug wrong,
+# 422 = no such tenant). Entries listed here are manual seeds/overrides.
+#
+# Discovered row fields (see plan-general.md section 10):
+#   id, host, tenant, site, wd_shard, locale, status, source, verified_at,
+#   facet_counts, matched_req_count
+#
+# Per-tenant operator knobs:
+#   identities_per_tenant           ceiling, not a target. Default 1.
+#   tenant_concurrency_cap          FORCED to 1 while no proxy pool is assigned.
+#   max_apps_per_identity_per_day   per-identity pacing cap.
+#   proxy_pool                      key into config/proxies.yaml.
+
+tenants: []
+
+defaults:
+  ats_family: workday
+  locale: en-US
+  identities_per_tenant: 1
+  tenant_concurrency_cap: 1
+  max_apps_per_identity_per_day: 25
+  proxy_pool: null
+  status: unverified

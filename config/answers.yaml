@@ -1,0 +1,33 @@
+# Canonical question -> answer seeds.
+#
+# Every web-form channel asks roughly the same ~20 questions in different words. These seed
+# the tenant-scoped answer cache BEFORE any LLM call (plan-general.md section 6.2), so the
+# LLM is only reached on a genuine cache miss.
+#
+# Key normalisation (must match the resolver):
+#   lowercase, strip trailing '*'/'required' markers, strip punctuation, collapse whitespace.
+# Values may be a literal, or the token 'country' meaning "resolve from config/visa.yaml".
+
+answers:
+  'are you legally authorised to work in the country of this role': 'country:right_to_work'
+  'do you require sponsorship': 'country:require_sponsorship'
+  'do you now or will you in the future require sponsorship': 'country:require_sponsorship'
+  'will you now or in the future require visa sponsorship': 'country:require_sponsorship'
+  'expected salary': 'open to discussion, aligned to the band for the role'
+  'salary expectations': 'open to discussion, aligned to the band for the role'
+  'notice period': 'one month'
+  'when can you start': 'one month from offer'
+  'willing to relocate': 'yes - Dublin or London'
+  'are you willing to travel': 'occasionally, yes'
+  'how did you hear about this role': 'the company careers site'
+  'do you have experience with java': 'yes - 8+ years'
+  'highest level of education': "bachelor's degree"
+  'are you currently employed': 'yes'
+
+# Voluntary disclosures: always decline. Never guess demographics.
+disclosures:
+  gender: 'Decline to self-identify'
+  race_ethnicity: 'Decline to self-identify'
+  veteran_status: 'Decline to self-identify'
+  disability_status: 'Decline to self-identify'
+  preferred_name: ''          # blank => use legal first name

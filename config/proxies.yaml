@@ -1,0 +1,15 @@
+# Sticky egress endpoints - one per identity (plan-general.md section 8).
+#
+#   pools:
+#     <pool-name>:
+#       - 'http://user:pass@gate.provider.net:8000'
+#
+# Rules baked into the code:
+#   * A tenant whose identities have no assigned pool forces tenant_concurrency_cap = 1.
+#     Extra accounts from one IP add ban surface with no throughput gain.
+#   * Proxies are NEVER used for discovery - only for browser/HTTP apply and scraping.
+#   * Proxies are NEVER used for email (Cloudflare owns sending reputation; section 8).
+#
+# Status: creds pending. Empty is valid - doctor reports it and concurrency stays 1.
+
+pools: {}

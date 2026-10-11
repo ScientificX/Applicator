@@ -1,0 +1,40 @@
+# Target profile - single source of truth for matching.
+# Mirrors plan-general.md section 2.1 (that doc is authoritative; keep them in step).
+target:
+  seniority: [mid, senior]                       # "AVP-ish" individual contributor
+  title_include:
+    - '\bAVP\b'
+    - 'Assistant Vice President'
+    - 'Senior Software Engineer'
+    - 'Backend Engineer'
+    - 'Java Engineer'
+    - 'Software Engineer (III|IV)'
+    - 'Lead Engineer'
+    - '(Assistant|Associate)\s+(Vice[\s-]?President|VP)\b'   # the AVP-equivalent family
+  title_exclude:
+    - 'Intern'
+    - 'Graduate'
+    - 'Analyst'
+    - 'Principal'
+    - 'Director'
+    - '(?<!Assistant )(?<!Associate )\bVP\b'                  # never veto AVP-equivalents
+    - 'Manager'
+  stack_must: ['Java', 'Spring', 'microservices', 'REST', 'SQL']
+  stack_nice: ['Kafka', 'Kubernetes', 'Docker', 'AWS', 'Azure', 'GCP', 'Terraform',
+               'low.?latency', 'distributed', 'JUnit', 'Mockito', 'CI/CD', 'observability']
+  domain_nice: ['bank', 'financial services', 'payments', 'trading', 'fintech', 'capital markets']
+  locations:
+    preferred: ['Dublin', 'Ireland']                  # tier 1
+    next:      ['London', 'United Kingdom']           # tier 2
+    also:      ['Remote', 'EMEA Remote', 'EU Remote']  # tier 3
+  comp:
+    IE_min_eur: 70000
+    UK_min_gbp: 75000
+    remote_min_eur: 70000
+  top_k_per_run: 25
+  fresh_window_minutes: 60                            # hunt cadence
+
+# SEMANTICS (implemented at G2, pinned by scripts/lint_criteria.py):
+#   pass = any(title_include match) AND NOT any(title_exclude match), case-insensitive.
+# So title_exclude is a VETO, not an allow-list: dropping 'Associate' from the veto does
+# not admit associate-titled roles - title_include has to match them too.

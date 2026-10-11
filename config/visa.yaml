@@ -1,0 +1,34 @@
+# Right-to-work and sponsorship logic. Mirrors plan-general.md section 2.2.
+visa:
+  # Ireland: no visa needed. Everywhere else: sponsorship required.
+  right_to_work:
+    IE: none
+    default: sponsorship_required
+
+  # JD phrase filters. exclude_if applies a ranking penalty / drop; boost_if applies a boost.
+  jd_filter:
+    exclude_if:
+      - 'no sponsorship'
+      - 'unable to sponsor'
+      - 'must already have the right to work'
+      - 'we do not (provide|offer) visa'
+      - 'no visa sponsorship'
+      - 'unable to provide visa'
+    boost_if:
+      - 'visa sponsorship (is )?available'
+      - 'we (do )?sponsor'
+      - 'sponsorship provided'
+      - 'relocation support'
+
+  # Country-scoped answers, seeded into the question cache BEFORE any LLM call.
+  # Country is inferred from the posting location (Workday: locationsText).
+  # This is why IE and GB answers can never cross-contaminate.
+  answers:
+    IE:
+      require_sponsorship: 'No'
+      right_to_work: 'Yes'
+    GB:
+      require_sponsorship: 'Yes'
+      right_to_work: 'No'
+    default:
+      require_sponsorship: 'Yes'
