@@ -140,8 +140,9 @@ System-wide, not channel-specific.
 target:
   seniority: [mid, senior]                       # "AVP-ish" IC
   title_include: ['\bAVP\b','Assistant Vice President','Senior Software Engineer',
-                  'Backend Engineer','Java Engineer','Software Engineer (III|IV)','Lead Engineer']
-  title_exclude: ['Intern','Graduate','Analyst','Principal','Director','\bVP\b','Manager']
+                  'Backend Engineer','Java Engineer','Software Engineer (III|IV)','Lead Engineer',
+                  '(Assistant|Associate)\s+(Vice[\s-]?President|VP)\b']
+  title_exclude: ['Intern','Graduate','Analyst','Principal','Director','(?<!Assistant )(?<!Associate )\bVP\b','Manager']
   stack_must: ['Java','Spring','microservices','REST','SQL']
   stack_nice: ['Kafka','Kubernetes','Docker','AWS','Azure','GCP','Terraform','low.?latency',
                'distributed','JUnit','Mockito','CI/CD','observability']
@@ -153,6 +154,8 @@ target:
   comp: { IE_min_eur: 70000, UK_min_gbp: 75000, remote_min_eur: 70000 }
   top_k_per_run: 25
 ```
+
+`title_exclude` is a **veto**, not an allow-list - a posting must also match `title_include` to survive. The `(?<!Assistant )(?<!Associate )` lookbehind stops the `\bVP\b` veto from killing AVP-equivalent titles like "Assistant VP" or "Associate VP"; a plain "VP" is still vetoed.
 
 ### 2.2 Visa / right-to-work - `config/visa.yaml`, enforced by `match/visa.py`
 
