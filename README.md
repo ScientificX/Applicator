@@ -6,14 +6,22 @@ actually gets responses.
 
 ## Start here
 
-1. [`plan-general.md`](plan-general.md) - **the program.** Read the START block, begin at G0.
-2. [`plan-workday.md`](plan-workday.md) - **workstream W (Workday).** Entered only at gate H1a (G1)
+1. [`AGENTS.md`](AGENTS.md) - **working rules for agents** (and humans): commands, conventions,
+   the mandatory worktree -> branch -> merge-request flow, and the doc-update duty.
+2. [`plan-general.md`](plan-general.md) - **the program.** Read the START block, begin at G0.
+3. [`plan-workday.md`](plan-workday.md) - **workstream W (Workday).** Entered only at gate H1a (G1)
    and H1b (G5). Do not start here.
-3. `../my-email-worker/AGENT_ONBOARDING.md` - the mail service contract (inbound API).
+4. [`docs/architecture.md`](docs/architecture.md) - **high-level design**: components, layers,
+   seams, data flow.
+5. [`docs/design.md`](docs/design.md) - **low-level design**: class/API contracts, DB schema,
+   config schemas, external HTTP contracts.
+6. `../my-email-worker/AGENT_ONBOARDING.md` - the mail service contract (inbound API).
 
 ## Current state
 
-`PS-5.4` - design closed, nothing scaffolded. Next action: **G0**.
+`PS-5.4` - **G0 landed**: `uv`/Python 3.13 scaffold, typed config, SQLite schema v1, `doctor`,
+and the criteria title gate + test battery. Next action: **G1** (hunt layer) via gate H1a.
+
 
 ## Rules of the doc set
 

@@ -47,7 +47,17 @@ def check_python(s: Settings) -> Check:
 
 
 def check_repo_files(s: Settings) -> Check:
-    required = ["pyproject.toml", "uv.lock", "README.md", "plan-general.md", "plan-workday.md"]
+    # AGENTS.md and docs/ are part of the shipped doc set: a change that drops them is a FAIL.
+    required = [
+        "pyproject.toml",
+        "uv.lock",
+        "README.md",
+        "AGENTS.md",
+        "plan-general.md",
+        "plan-workday.md",
+        "docs/architecture.md",
+        "docs/design.md",
+    ]
     missing = [f for f in required if not (ROOT / f).exists()]
     if missing:
         return Check("repo files", FAIL, "missing: " + ", ".join(missing))
