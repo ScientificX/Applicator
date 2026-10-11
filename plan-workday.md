@@ -78,15 +78,20 @@ Discover Workday tenants -> discover matching reqs -> rank -> tailor one resume 
 | Park rate | < 10%, never blocks other tenants |
 | Tenant discovery | >= 20 live tenants, >= 80% correct site slugs, **zero manual entries** |
 
-## 3. Criteria, visa and targeting
+## 3. Criteria and targeting
 
-**Moved to `plan-general.md` sections 2.1-2.2** (system-wide, not channel-specific): the target
-profile (`config/criteria.yaml`) and the visa / right-to-work config (`config/visa.yaml`, enforced by
-`match/visa.py`). Workday-specific notes only:
+**Owned by `plan-general.md` section 2.1** (`config/criteria.yaml`). Workday-specific notes:
 
 - The `cxs` search endpoint accepts `searchText` and `appliedFacets`; the criteria feed both (section 7).
 - Location tiers matter more here than on other channels: Workday tenants skew to large employers with Dublin/London offices, so the tier-1 filter does most of the work.
+
+## 4. Visa / right-to-work
+
+**Owned by `plan-general.md` section 2.2** (`config/visa.yaml`, enforced by `match/visa.py`). Workday-specific notes:
+
 - Country for visa answers is derived from the posting location; Workday `locationsText` is the usual source.
+- The sponsored-role filter (`boost_if` / `exclude_if`) runs after matching, over the same posting rows the hunt layer produced.
+
 
 ## 5. Workday slice of the pipeline
 

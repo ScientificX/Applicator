@@ -29,7 +29,7 @@ Ollama tuning + `bge-m3`.
 | G3 | first submission, non-Workday ATS | - | this doc sections 3, 6, 9 |
 | G4 | inbound analytics | - | this doc sections 6.2, 6.3 |
 | G5 | Workday apply | **H1b** apply seam | `plan-workday.md` sections 11-13 (`WorkdayWebApply`) |
-| G6 | autonomy + hardening | **H2** return | `plan-workday.md` section 12 |
+| G6 | autonomy + hardening | **H2** return | `plan-workday.md` section 16 (risks, drift) |
 
 **Conflict rule:** if a workstream doc contradicts this one, this one wins and the other gets fixed.
 
@@ -61,7 +61,7 @@ Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**. `pla
 | Identity / proxies / rotation policy | **general 8** | pointer |
 | Data model (canonical) | **general 10** | extensions only |
 | Milestones, gates, risks, human actions, `[?]` register | **general 11-14** | pointer |
-| `cxs` endpoints, oracle, shards, apply state machine, selectors, HAR fixtures | **plan-workday.md 1, 6-7, 12** | referenced from general 4 and 11 |
+| `cxs` endpoints, oracle, shards, apply state machine, selectors, HAR fixtures | **plan-workday.md 1, 6-7, 11-13, 16** | referenced from general 4 and 11 |
 
 ## 1. Verified facts
 
