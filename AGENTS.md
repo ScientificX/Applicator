@@ -279,10 +279,11 @@ Keep commits focused; the MR description, not the commit body, carries the narra
 
 ### 9.4 Push the branch and open a merge request
 
-`origin` is configured as **`https://github.com/ScientificX/Applicator.git`** (HTTPS).
-SSH is **not** usable from this machine (no key under `~/.ssh`); HTTPS works through the
-VS Code git credential helper. Confirm before pushing, and never push to a remote you did not
-verify:
+`origin` is configured as **`git@github.com:ScientificX/Applicator.git`** (SSH) - verified at G1,
+where `git push -u origin feat/g1-hunt-layer` succeeded over SSH. *(This section previously claimed
+HTTPS with "SSH is not usable"; that was wrong - the remote is SSH and it works. Fallback if SSH
+ever breaks: `git remote set-url origin https://github.com/ScientificX/Applicator.git`.)*
+Confirm before pushing, and never push to a remote you did not verify:
 
 ```bash
 git remote -v
