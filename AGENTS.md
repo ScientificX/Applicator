@@ -114,6 +114,9 @@ Before you call a change finished:
 - [ ] New/changed public classes, functions, CLI commands, config keys, or HTTP calls are
       documented in `docs/design.md`; structural/layering changes are documented in
       `docs/architecture.md` (**§8 — mandatory**).
+- [ ] If this change completes a stage/gate or satisfies an acceptance criterion, the **plan docs
+      are updated in the same MR** — milestone status flipped, gate recorded, metrics measured,
+      `[?]` -> `[V]` (**§8.1 — mandatory**).
 - [ ] `AGENTS.md` still describes the repo accurately; update it if anything in §1-§7 changed.
 - [ ] No secrets, no `state/`, no `artifacts/`, no `.env` staged for commit.
 
@@ -145,11 +148,47 @@ that leaves the docs stale is incomplete and must not be submitted.
 | adds or changes a public class, function, dataclass, Pydantic model, field, CLI command/flag, exit code, config key, DB table/column, or HTTP call | **`docs/design.md`** |
 | changes the schema | `SCHEMA_VERSION` in `db.py` **and** the table/column tables in `docs/design.md` (and the schema lists in `plan-general.md` §10 / `plan-workday.md` §14 if the model changed) |
 | changes targeting/visa/answers/tenants/proxies config | the relevant `config/*.yaml` **and** the "Config file contracts" section of `docs/design.md`; if the semantics changed, `plan-general.md` §2 too |
-| implements a stage/stub/gate | `docs/design.md` (contract status: planned -> implemented), `docs/architecture.md`, and the stage table + `README.md` "Current state" |
+| implements a stage/stub/gate, or meets an acceptance criterion | **the plan docs per §8.1** (milestone/step status, gate record, measured metrics, `[?]` -> `[V]`), **plus** `docs/design.md` (contract status: planned -> implemented), `docs/architecture.md`, and `README.md` "Current state" |
 | verifies a `[?]` or changes a fact | `plan-general.md` §14 / `plan-workday.md` §1 (`[?]` -> `[V]`) **and** `docs/design.md` |
 | changes build/test/run commands, tooling, or conventions | **`AGENTS.md` §4-§7** and `README.md` if navigation changed |
 
-**Rules for updating `AGENTS.md` itself:**
+### 8.1 Closing a stage, gate or acceptance criterion — update the plans
+
+Hitting an acceptance criterion or crossing a gate is a **documentation event**, not only a code
+event. `plan-general.md` and `plan-workday.md` are the program's status of record, so when an
+implementation satisfies them they must be updated **in the same MR** as the code, with the
+evidence. A green test suite alone does not close a gate.
+
+When you complete a stage (`G0`-`G6`), a workstream step (`G*-W*`), or meet an acceptance
+criterion, update:
+
+| Update | Where |
+|---|---|
+| **Milestone/step status** — annotate the acceptance cell as *met*, with the date and the evidence (test output, MR, captured artifact). Never delete the criterion; mark it satisfied. | `plan-general.md` §11; `plan-workday.md` §15 |
+| **Gate closure** — record the gate (`H1a`/`H1b`/`H2`) as *passed* and tick its **exit** condition from the gate table. | `plan-general.md` §11.1; `plan-workday.md` "Entry, exit and code map" |
+| **Measured metrics vs targets** — replace each target with the measured value (`jobagent report`, the DB, the MR evidence), or state the gap explicitly. | `plan-general.md` §2 (headline + supporting metrics); `plan-workday.md` §2 |
+| **`[?]` -> `[V]`** — promote every question the implementation answered, and mirror it into the design contracts. | `plan-general.md` §14; `plan-workday.md` §1 + appendix; `docs/design.md` §14 |
+| **New facts, quirks and drift** — verified endpoints, selectors, error envelopes and any newly observed behaviour. | `plan-general.md` §1 / §12; `plan-workday.md` §1 / §16 |
+| **Stage router advance** — set the next stage and the gate that opens it. | `README.md` "Current state" |
+| **Contract status** — flip *planned* -> *implemented* and correct signatures to match the code. | `docs/design.md`; `docs/architecture.md` if the shape moved |
+
+Rules:
+
+1. **A gate is a promise, not a label.** Mark it *passed* only with demonstrated exit evidence
+   in the MR (test output, measured metric, captured artifact) — never because the code exists.
+2. **Deviations must be recorded, not hidden.** If the implementation diverges from the plan
+   (a different protocol, an extra table, a changed policy), update the plan *and* state the
+   deviation and why. Code and plan must not silently disagree.
+3. **The conflict rule still applies.** If a workstream doc now contradicts `plan-general.md`,
+   `plan-general.md` wins and the loser is fixed (`plan-general.md` "START HERE").
+4. **Never mark something met that was not measured.** If a target was not measured, write
+   "not measured" — that is honest, and the gap is itself a finding worth a risk row.
+5. **Update the criterion where it lives.** Acceptance criteria live in the plan documents only;
+   do not restate them in `docs/` — reference them.
+6. **Close the loop in the MR description**: name the stage/gate, the acceptance criterion met,
+   the measured result, and the plan sections updated.
+
+### 8.2 Rules for updating `AGENTS.md` itself
 
 1. If your change makes any statement in §1-§7 inaccurate, fix that statement in the same MR.
 2. If your change adds a new command, gate, doc, or convention, add it to the relevant table/list.
