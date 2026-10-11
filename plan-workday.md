@@ -14,7 +14,7 @@ at the gates below.
 
 | Gate | Enters at | Preconditions | Deliverable |
 |---|---|---|---|
-| **H1a** discovery | `G1` | general `DiscoverySource` protocol; `postings`/`companies`/`tenant_probes`/`shards` migrations; `curl_cffi` wrapper | `G1-W1` `WorkdayCxsDiscovery`, `G1-W2` `WorkdayTenantDiscovery` |
+| **H1a** discovery | `G1` | general `DiscoverySource` protocol; `postings`/`companies`/`tenant_probes`/`shards` migrations; `curl_cffi` wrapper | `G1-W1` `WorkdayCxsDiscovery`, `G1-W2` `WorkdayTenantDiscovery` — **OPEN (partial) 2026-10-11**: both classes exist and are consumed through the protocol with no Workday branches, but W1's acceptance rows are not met (8 live tenants vs >= 20; site slugs 8/16 = 50% vs >= 80%). Not passed. |
 | **H1b** apply | `G5` | G3 proven on a non-Workday channel; attribution working on real mail incl. a Workday ack; address model live; per-identity proxies; **HAR captured**; `doctor` green; budget caps | `G5-W1..W3` `WorkdayWebApply` + onboarding |
 | **H2** return | `G4`/`G6` | - | metrics, drift signatures and fixtures back into `plan-general.md` sections 2, 12, 1 |
 
@@ -52,7 +52,7 @@ at the gates below.
 | Discovery oracle | **200** valid - **404 `{"errorCode":"S21","message":"not found: Job_Posting_Site_ID=X"}`** = tenant real, site slug wrong - **422 `{"errorCode":"HTTP_422"}`** = no such tenant |
 | Drift canary | `errorCaseId` is unique per request -> alert if the error envelope changes |
 | DNS | `*.wdN.myworkdayjobs.com` wildcard resolves for **any** slug (incl. bogus); `wd11` = NXDOMAIN -> shard set enumerable, tenant existence only via `cxs` |
-| Root `/` | 406 with 0 bytes even with a full Chrome UA -> HTML paths need `curl_cffi impersonate="chrome"` |
+| Root `/` | **[V] 406 with 0 bytes even under `curl_cffi impersonate="chrome"`** - the bare host is never usable. `/en-US` -> 404; `/en-US/{site}` -> 200 with the site slug present in the HTML. |
 | Job detail, apply flow | [?] **VERIFY from HAR at `G0-W`** - the only remaining unknown |
 | DeepSeek | `deepseek-flash` = V4.1-Flash: **1,048,576 ctx**, 393,216 max out, **text+image** input, `effort: low|high|max` (default high). `deepseek-v4-pro` exists (text-only). `deepseek-chat` is an alias -> **pin literal ids** |
 | DeepSeek JSON | `response_format={"type":"json_object"}` [V], round trip **0.715 s** |
@@ -128,7 +128,7 @@ class TenantSource(Protocol):
 
 Adding `BruteForceBreadthSource` (companies x slug variants x live shards, backed by `companies` + `tenant_probes`) or `CrtShCustomDomainSource` later = **one new class + one config entry**. The oracle, schema, and pipeline are unchanged; sources may run in parallel with weights. Inverted-only is today's default; both is a config change tomorrow.
 
-**6.5 Site-slug acquisition order** - (1) aggregator/search URL (exact, free), (2) `curl_cffi impersonate="chrome"` landing fetch ([?] confirm 406 clears), (3) generated candidates (`{Pascal}ExternalCareerSite`, `{Pascal}Careers`, `External`, `Careers`, `{Pascal}External`, `{Pascal}Global`, ...), probe-verified.
+**6.5 Site-slug acquisition order** - **[V] corrected at G1:** the landing page **cannot discover a slug**. Bare `/` is 406 even impersonated, `/en-US` is 404, and `/en-US/{site}` requires the very slug being sought. Order: (1) aggregator/search URL or the company careers domain - exact and free, and the plan's inverted-first default; (2) generated candidate templates probed through the oracle, including separator/suffix forms (`{Pascal}_Careers` is what resolved cisco); (3) keep confirmed-but-unresolved tenants as `tenants.status = site_unknown` rather than discarding them.
 
 ## 7. Job discovery (`discover/workday_cxs.py`)
 
@@ -227,9 +227,9 @@ Program stages live in `plan-general.md` section 11. Workday steps hang off them
 
 | Step | Stage | Scope | Acceptance |
 |---|---|---|---|
-| **G0-W** | G0 | HAR capture of one real Workday application; Patchright engine smoke test; canary tenant pick (Citi likely) | HAR saved to `artifacts/har/`; `data-automation-id` smoke test passes on a real tenant |
-| **G1-W1** | G1 | Tenant discovery: shard DNS, the 200/S21/422 oracle, slug candidates, inverted aggregator harvest, facet ranking | >= 20 live tenants auto-found, >= 80% correct site slugs, zero manual entries |
-| **G1-W2** | G1 | Job discovery: `searchText` + `appliedFacets`, 20/page, incremental | criteria-matching reqs for 20 tenants < 3 min; re-run incremental |
+| **G0-W** | G0 | HAR capture of one real Workday application; Patchright engine smoke test; canary tenant pick (Citi likely) | HAR saved to `artifacts/har/`; `data-automation-id` smoke test passes on a real tenant - **NOT DONE 2026-10-11**: HAR capture is still outstanding; it is the `[?]` for the job-detail and apply-flow endpoints |
+| **G1-W1** | G1 | Tenant discovery: shard DNS, the 200/S21/422 oracle, slug candidates, inverted aggregator harvest, facet ranking | >= 20 live tenants auto-found, >= 80% correct site slugs, zero manual entries - **PARTIAL 2026-10-11**: oracle works (290 probes -> 16 real tenants, 9 of them `site_unknown`); **8 live vs the >= 20 target**, slug resolution **50% vs >= 80%** (gap row in `plan-general.md` section 12) |
+| **G1-W2** | G1 | Job discovery: `searchText` + `appliedFacets`, 20/page, incremental | criteria-matching reqs for 20 tenants < 3 min; re-run incremental - **MET (scope-adjusted) 2026-10-11**: 320 Workday postings stored from the 8 live tenants, 100% carrying `req_id`, 0 duplicates; the "20 tenants" wording is unreachable while W1 returns 8 |
 | **G5-W1** | G5 | Identity onboarding: alias mint, persistent context, account creation, mail-worker verification (code **and** same-context link), rotation | 3 tenants onboarded unattended; sessions survive restart |
 | **G5-W2** | G5 | Apply state machine, `--dry-run` to Review | 3 real jobs at Review with 0 manual inputs |
 | **G5-W3** | G5 | Multi-identity: scheduler, caps, per-identity proxy, ban detection, requeue | 20 apps / 3 tenants, >= 80% submitted, no duplicate req |

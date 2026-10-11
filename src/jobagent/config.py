@@ -128,6 +128,29 @@ class Answers(BaseModel):
     disclosures: dict[str, str] = Field(default_factory=dict)
 
 
+class SourceEntry(BaseModel):
+    family: str
+    enabled: bool = True
+    boards: list[str] = Field(default_factory=list)
+
+
+class Sources(BaseModel):
+    """Mirrors sources.yaml (top-level key `sources`)."""
+
+    sources: list[SourceEntry] = Field(default_factory=list)
+
+
+class SeedCompany(BaseModel):
+    name: str
+    slugs: list[str] = Field(default_factory=list)
+
+
+class SeedCompanies(BaseModel):
+    """Mirrors seed_companies.yaml: unverified tenant candidates to probe."""
+
+    companies: list[SeedCompany] = Field(default_factory=list)
+
+
 class Proxies(BaseModel):
     pools: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -154,6 +177,14 @@ def load_tenants() -> Tenants:
 
 def load_answers() -> Answers:
     return Answers.model_validate(read_yaml("answers.yaml"))
+
+
+def load_sources() -> Sources:
+    return Sources.model_validate(read_yaml("sources.yaml"))
+
+
+def load_seed_companies() -> SeedCompanies:
+    return SeedCompanies.model_validate(read_yaml("seed_companies.yaml"))
 
 
 def load_proxies() -> Proxies:

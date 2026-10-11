@@ -30,7 +30,12 @@ src/jobagent/
   filters.py      title_gate (include/veto)                   done
   checks.py       doctor checks                               done
   cli.py          Typer app                                   done
-  discover/       DiscoverySource, TenantSource impls         planned (G1)
+  net.py          HttpClient (curl_cffi, polite)              done (G1)
+  models.py       Source, Posting - shared domain objects      done (G1)
+  discover/       base.py (protocols) + store.py (upsert)     done (G1)
+                  ats.py (greenhouse|lever|ashby|remotive)    done (G1)
+                  workday_cxs.py (cxs search)                 done (G1-W2)
+                  workday_tenants.py (oracle, shards, slugs)  done (G1-W1)
   match/          dedupe, visa.py, scoring                    planned (G2)
   tailor/         resume build + gates                        planned (G2)
   apply/          workday.py, onboard.py, questions.py        planned (G3/G5)
@@ -303,27 +308,34 @@ code page, and Rich's legacy path (`_win32_console.WindowsConsole`) encodes tabl
 that code page regardless of the stream's own encoding — which made `jobagent doctor | tail`
 (and any CI or log capture) die with `UnicodeEncodeError` while it printed fine interactively.
 
-## 7. Planned protocols (pinned names, proposed signatures)
+## 7. Protocols (pinned names)
 
 Owner: `plan-general.md` §3, §4; `plan-workday.md` 6.4, 11. These are the seams that keep the
-Workday channel out of the core. Names are fixed by the plan; signatures marked *(proposed)*
-are the intended shape and are confirmed when the implementing stage lands.
+Workday channel out of the core. Names are fixed by the plan. 7.1 and 7.2 are **implemented** at
+G1 (signatures below match the code); 7.3 and 7.4 remain *(planned)*, with their intended shape.
 
-### 7.1 `DiscoverySource` — one per ATS family *(planned, G1)*
+### 7.1 `DiscoverySource` — one per ATS family *(implemented, G1)*
 
 ```python
 class DiscoverySource(Protocol):
     family: str                                                        # e.g. "greenhouse"
     async def discover(self, source_row: Source, criteria: Criteria) -> AsyncIterator[Posting]:
         """Yield normalized postings for one configured source; idempotent by (source, source_id)."""
-    async def poll(self, conn: sqlite3.Connection, criteria: Criteria) -> int:
-        """Upsert postings, refresh first_seen/last_seen/active, return the count seen. (proposed)"""
+    async def poll(self, conn: sqlite3.Connection, criteria: Criteria,
+                   *, source_row: Source | None = None) -> int:
+        """Upsert postings, refresh first_seen/last_seen/active, return the count seen."""
 ```
 
-Implementations: `discover/workday_cxs.py` (`WorkdayCxsDiscovery`), then board APIs
-(Greenhouse/Lever/Ashby/Workable/Recruitee). Must not leak family-specific types upward.
+`BaseDiscoverySource` (`discover/base.py`) implements `poll` once so a family only writes
+`discover`. Idempotency is `store.upsert_postings` on `UNIQUE(source, source_id)`: `first_seen` is
+preserved, `last_seen` refreshed, and `mark_inactive` deactivates rows absent from a full poll.
+Rows flush in batches of 200.
 
-### 7.2 `TenantSource` — tenant candidate providers *(planned, G1-W1)*
+Implementations: `discover/workday_cxs.py` (`WorkdayCxsDiscovery`) and `discover/ats.py`
+(`GreenhouseSource`, `LeverSource`, `AshbySource`, `RemotiveSource`). Must not leak
+family-specific types upward - everything is a `models.Posting`.
+
+### 7.2 `TenantSource` — tenant candidate providers *(implemented, G1-W1)*
 
 ```python
 @dataclass(frozen=True)
@@ -332,7 +344,7 @@ class TenantCandidate:
     tenant: str
     site: str | None
     source: str
-    evidence: dict[str, Any]                                          # (proposed) e.g. apply_url
+    evidence: dict[str, Any]                                          # e.g. {"shards": [...]}
 
 class TenantSource(Protocol):
     async def yield_candidates(self, criteria: Criteria) -> AsyncIterator[TenantCandidate]: ...
@@ -456,9 +468,59 @@ Oracle for tenant/site validity (one `limit:1` probe per `(slug, shard, site_gue
 
 Drift canary signal: `errorCaseId` is unique per request; alert if the error envelope changes.
 DNS note: `*.wdN.myworkdayjobs.com` resolves for **any** slug (browsing DNS is not a validity
-test) — existence is only provable via `cxs`. Root `/` returns `406`.
+test) - existence is only provable via `cxs`. A **bare** `GET /` returns `406` with an empty body
+**even under `curl_cffi impersonate="chrome"`**; `GET /en-US` returns `404`; only
+`GET /en-US/{site}` returns `200` - and it echoes back the site slug, so it confirms a slug but
+cannot discover one (`plan-workday.md` 6.5).
 
-Job detail / apply-flow endpoints: **[?] to verify from the `G0-W` HAR** (`plan-general.md` §14).
+Job detail / apply-flow endpoints: **[?] still to verify from the `G0-W` HAR**
+(`plan-general.md` §14). `WorkdayCxsDiscovery.fetch_detail()` exists but is **unverified and
+uncalled**; do not build on it until the HAR lands.
+
+### 8.3 Non-Workday source endpoints (verified live at G1)
+
+| Family | Endpoint | Verified shape |
+|---|---|---|
+| greenhouse | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | `{"jobs":[{"id","title","updated_at","absolute_url","location":{"name"},"content"}]}`; `content` is HTML |
+| lever | `GET api.lever.co/v0/postings/{co}?mode=json` | `[{"id","text","createdAt","hostedUrl","descriptionPlain","categories":{"location","team"}}]`; a wrong `co` is `404 {"ok":false,"error":"Document not found"}` |
+| ashby | `GET api.ashbyhq.com/posting-api/job-board/{org}` | `{"jobs":[{"id","title","location","department","jobUrl","descriptionHtml","isRemote"}]}` |
+| remotive | `GET remotive.com/api/remote-jobs` | `{"jobs":[{"id","url","title","company_name","publication_date","candidate_required_location","description"}]}` |
+
+No authentication is required for any of them. **Remotive's `url` is its own page, never the
+employer ATS URL**, so it cannot feed the inverted Workday tenant harvest
+(`plan-workday.md` 6.3) - it is a posting source only. `discover/ats.py` maps all four to
+`models.Posting`; wrong board tokens 404 and are simply skipped (`company_name` falls back to the
+board token when the vendor omits it).
+
+### 8.4 Config files added at G1
+
+| File | Loader | Shape |
+|---|---|---|
+| `config/sources.yaml` | `config.load_sources() -> Sources` | `sources: [{family, enabled, boards: [str]}]`. **Board tokens are data, not criteria** (`AGENTS.md` 3.2). An empty `boards` list means the family needs none (aggregators). |
+| `config/seed_companies.yaml` | `config.load_seed_companies() -> SeedCompanies` | `companies: [{name, slugs: [str]}]`. **Unverified slug guesses** fed to the oracle; a 422 is the expected answer for most and is negative-cached in `tenant_probes`. |
+
+### 8.5 `net.HttpClient` and `discover/store.py` (implemented, G1)
+
+`net.HttpClient` wraps `curl_cffi.requests.AsyncSession(impersonate="chrome")` and is the only way
+the code should make HTTP calls. It enforces a global concurrency cap (16), a per-host cap (2),
+inter-request jitter (0.15-0.5 s), and 2 retries with exponential backoff on `{429,500,502,503,504}`
+and on connection errors. It returns `net.Resp(status, url, text)` with `.ok`, `.json()`, and
+`.snippet()`. It never raises on a bad status - callers branch on `.status`.
+
+`discover/store.py` owns posting persistence: `utcnow()`, `jd_hash(text)`, `ensure_company(...)`,
+`upsert_postings(conn, postings) -> {"inserted","updated"}`, `mark_inactive(conn, source, seen_ids)`,
+`touch_source(conn, family)`. It is the only place that writes `postings`, so dedupe semantics live
+in one function.
+
+`models.py` owns `Source` (a `sources` row) and `Posting` (normalized posting; field names mirror
+the `postings` columns). It exists because the pinned protocols referenced those types with no
+owning module - **a recorded deviation** (see the module docstring).
+
+`discover/workday_tenants.py` owns the oracle: `classify_probe(status, body) -> (verdict,
+error_code)` (pure), `shard_sweep()`, `site_candidates(slug)`, `SeedTenantSource`, and
+`WorkdayOracle` (`probe`, `harvest_facets`, `persist_tenant`, `resolve`, `run`). Every probe is
+recorded in `tenant_probes`, so re-runs are nearly free (`run 2` at G1 was 98 probes and 300 cache
+hits).
 
 ## 9. Workday apply state machine (planned, G5-W2)
 

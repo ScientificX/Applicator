@@ -1,0 +1,78 @@
+# Candidate companies to probe for ATS tenants at G1-W1.
+#
+# NOT a tenant list. Every slug here is an unverified guess; the cxs oracle decides:
+#   200 -> tenant + site valid | 404 S21 -> tenant exists, site slug wrong | 422 -> no tenant
+# Candidates that come back 422 are negative-cached in tenant_probes and cost one probe each.
+# Weighted toward banks/fintech and large tech with Dublin/London presence (see criteria.yaml).
+
+companies:
+  - name: Citi
+    slugs: [citi, citigroup, citicorp]
+  - name: JPMorgan Chase
+    slugs: [jpmorganchase, jpmc, jpmorgan]
+  - name: Goldman Sachs
+    slugs: [goldmansachs, goldman]
+  - name: Morgan Stanley
+    slugs: [morganstanley, ms]
+  - name: Barclays
+    slugs: [barclays]
+  - name: HSBC
+    slugs: [hsbc]
+  - name: Deutsche Bank
+    slugs: [deutschebank, db]
+  - name: UBS
+    slugs: [ubs]
+  - name: Mastercard
+    slugs: [mastercard]
+  - name: Visa
+    slugs: [visa]
+  - name: PayPal
+    slugs: [paypal]
+  - name: Fidelity Investments
+    slugs: [fidelity, fidelityinvestments]
+  - name: State Street
+    slugs: [statestreet]
+  - name: BNY Mellon
+    slugs: [bnymellon, bnym]
+  - name: Wells Fargo
+    slugs: [wellsfargo]
+  - name: Standard Chartered
+    slugs: [standardchartered, sc]
+  - name: NatWest
+    slugs: [natwest]
+  - name: Lloyds Banking Group
+    slugs: [lloydsbankinggroup, lloyds]
+  - name: Allied Irish Banks
+    slugs: [aib, alliedirishbanks]
+  - name: Bank of Ireland
+    slugs: [bankofireland]
+  - name: Revolut
+    slugs: [revolut]
+  - name: Stripe
+    slugs: [stripe]
+  - name: Susquehanna International
+    slugs: [sig, susquehanna]
+  - name: Nvidia
+    slugs: [nvidia]
+  - name: Salesforce
+    slugs: [salesforce]
+  - name: Workday
+    slugs: [workday]
+  - name: Broadcom
+    slugs: [broadcom, vmware]
+  - name: Intel
+    slugs: [intel]
+  - name: Oracle
+    slugs: [oracle]
+  - name: SAP
+    slugs: [sap]
+  - name: ServiceNow
+    slugs: [servicenow]
+  - name: Adobe
+    slugs: [adobe]
+  - name: Cisco
+    slugs: [cisco]
+  - name: Dell Technologies
+    slugs: [dell, delltechnologies]
+  - name: Equinix
+    slugs: [equinix]

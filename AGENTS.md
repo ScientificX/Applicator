@@ -29,9 +29,10 @@ Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**.
 - Browsers/HTTP: **Patchright** (patched Playwright) + **curl_cffi**.
 - Mail: **`my-email-worker`** (Cloudflare Worker, sibling repo) — **inbound only**;
   the agent talks to it over HTTP.
-- Current stage: **`PS-5.4`, G0 landed** (uv scaffold, typed config, SQLite schema v1,
-  `doctor`, criteria title gate + test battery). **G1..G6 are not built yet** — most of
-  the package tree is planned, not scaffolded.
+- Current stage: **`PS-5.4`; `G0` met, `G1` in progress** on `feat/g1-hunt-layer` (hunt layer +
+  Workday `cxs` discovery: `net.py`, `models.py`, `discover/`). **`G2..G6` are not built.**
+  Status of record is `plan-general.md` section 11: `G0` met, `G1` **partial** (8 live tenants vs
+  the >= 20 target; site-slug resolution 50% vs >= 80%). Do not treat G1 as closed.
 
 ## 2. Where the truth lives (read these; do not restate them)
 
@@ -109,13 +110,16 @@ Prefer `uv run ...` in a fresh checkout; the local interpreter works too
 | `uv run jobagent config show [--json]` | print parsed criteria + proxy posture |
 | `uv run jobagent db init` | create/upgrade the SQLite schema |
 | `uv run jobagent db status` | schema version + row counts |
+| `uv run jobagent tenants` | list known tenants from the DB |
+| `uv run jobagent tenants --discover [--refresh] [--limit N] [--concurrency N]` | probe seed candidates through the `cxs` oracle (G1-W1); writes `tenants` + `tenant_probes` |
+| `uv run jobagent discover [--family F] [--max-pages N] [--search S]` | poll all configured sources and upsert `postings` (G1) |
 | `uv run pytest -q` | run the test suite (`tests/`) |
 | `uv run python scripts/lint_criteria.py` | run the pinned title battery against `config/criteria.yaml` (exit 1 on mismatch) |
 | `uv run patchright install chromium` | install the browser Patchright drives |
 
-`jobagent` subcommands `tenants`, `discover`, `match`, `tailor`, `apply`, `onboard`,
-`run`, `report` are **labelled stubs** that exit 2 and name the stage that will build them.
-Replace a stub only when you implement that stage.
+`jobagent` subcommands `match`, `tailor`, `apply`, `onboard`, `run` and `report` are still
+**labelled stubs** that exit 2 and name the stage that will build them; `tenants` and `discover`
+were implemented at G1. Replace a stub only when you implement that stage.
 
 **Exit codes:** `doctor` -> 1 if any check FAILs (WARN never fails); stub -> 2;
 `db status` -> 1 when there is no database yet.
@@ -315,7 +319,8 @@ repo's default branch is `main`; if GitHub's default `HEAD` is ever left on a fe
 
 ## 10. Where code goes (module map)
 
-Implemented today: `config.py`, `db.py`, `filters.py`, `checks.py`, `cli.py`.
+Implemented today: `config.py`, `db.py`, `filters.py`, `checks.py`, `cli.py`, `net.py`,
+`models.py`, and the `discover/` package (G1).
 Planned (see `docs/architecture.md` and `docs/design.md`; do not create modules before the
 stage that needs them):
 
@@ -325,8 +330,12 @@ src/jobagent/
   db.py          # SQLite DDL, migrations, helpers             (G0, done)
   filters.py     # title gate (include/veto)                   (G0, done)
   checks.py      # doctor checks                               (G0, done)
-  cli.py         # Typer app: doctor, config, db + stubs       (G0, done)
-  discover/      # DiscoverySource + TenantSource impls        (G1)
+  cli.py         # Typer app: doctor, config, db, tenants,     (G0 + G1)
+                 #   discover + stubs
+  net.py         # HttpClient: curl_cffi, politeness, retries   (G1, done)
+  models.py      # Source, Posting - shared domain objects      (G1, done)
+  discover/      # base.py protocols, store.py upsert,          (G1, done)
+                 #   ats.py, workday_cxs.py, workday_tenants.py
   match/         # dedupe, filters, visa, scoring              (G2)
   tailor/        # select-and-patch resume + gates             (G2)
   apply/         # ApplyChannel impls, onboarding, questions   (G3/G5)
