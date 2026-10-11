@@ -90,11 +90,11 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }   # then fill in (nev
 uv run patchright install chromium
 ```
 
-- **Ollama belongs on the native Windows host**, on `127.0.0.1:11434` - which is what `OLLAMA_BASE`
-  already points at. While a WSL Ollama still runs, WSL's localhost relay (`wslrelay.exe`) owns
-  that port on the Windows side, so the native server has to be started with
-  `OLLAMA_HOST=127.0.0.1:11435` *and Windows clients silently reach the WSL instance instead*
-  (`plan-general.md` §13 item 5 - retire the unit to end this). Never run two Ollamas. Tune the
+- **Ollama runs on the native Windows host**, on `127.0.0.1:11434` - which is what `OLLAMA_BASE`
+  already points at. The WSL unit was retired on 2026-10-11, so there is exactly one Ollama: if a
+  second one ever runs inside WSL, `wslrelay.exe` republishes *its* port on the Windows side, the
+  native server fails to bind (`bind: Only one usage of each socket address ... is permitted`) and
+  Windows clients silently reach the WSL instance instead (`plan-general.md` §12). Tune the
   native server with the user environment variables `OLLAMA_MAX_LOADED_MODELS=1`,
   `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`.
 - `src/jobagent/config.py` loads `.env` automatically and resolves repo-relative paths

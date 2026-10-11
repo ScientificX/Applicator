@@ -61,7 +61,7 @@ at the gates below.
 | Model self-report | Unreliable (claimed "gpt-4o-mini"). Trust only the API `model` field |
 | Browser | `patchright` = drop-in patched Playwright (pure `py3-none` wheels, 3.10-3.14). `playwright-stealth` **excluded** (breaks `launch_persistent_context`) |
 | Hardware | RTX 5060 Ti 16 GB, compute 12.0, driver 610.88, native CUDA (no `/dev/dxg`). **Host RAM = 31.1 GB**, native Windows. Re-verified 2026-10-11 after the move off WSL; the earlier reading ("WSL RAM = 15.9 GB of host 32 GB", no `.wslconfig`) is historical |
-| Ollama | **0.40.3, native on Windows**, installed with its models; verified serving `127.0.0.1:11435` until the WSL unit is retired, then `127.0.0.1:11434` (`plan-general.md` section 1.4 - never run a second Ollama in WSL); `bge-m3` + `qwen3:8b` pulled; `qwen3:14b` still to pull; `glm-4.7-flash` (19 GB) too big for the free VRAM |
+| Ollama | **0.40.3, native on Windows**, serving `127.0.0.1:11434` (the WSL unit was retired 2026-10-11 - `plan-general.md` section 1.4: never run a second Ollama in WSL); GPU-backed inference verified; `bge-m3` + `qwen3:8b` in the Windows store; `qwen3:14b` still to pull; `glm-4.7-flash` (19 GB) too big for the free VRAM |
 | PDF tooling | **None** (`pdftotext`/`pypdf`/`pdfplumber` absent) -> add `pypdf`, `pdfplumber` |
 | Machine | AMD Ryzen 7 7700 (8C/16T); `C:` has 133 GB free (was "913 GB free" on the WSL ext4 volume) |
 
@@ -248,7 +248,7 @@ Program stages live in `plan-general.md` section 11. Workday steps hang off them
 | CF blocks mass signup | 3-5 tenants/day, jitter, warmed profiles, `--headed` fallback |
 | sm_120 wheel breakage | Ollama-only for local GPU; `fastembed` CPU fallback |
 | VRAM/RAM contention | stage-split scheduler; native host RAM 31.1 GB (no `.wslconfig`); `OLLAMA_MAX_LOADED_MODELS=1`, `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0` set as Windows user env vars |
-| Native Ollama cannot bind while WSL republishes the port | retire the WSL Ollama unit (`plan-general.md` section 13) and confirm `/api/version` reports the native build |
+| Native Ollama cannot bind while WSL republishes the port | **resolved 2026-10-11**: the WSL Ollama unit is retired (`plan-general.md` section 13 item 5) and the native build owns 11434. Rule kept: one Ollama per host, and verify `/api/version` before a run |
 | Hallucinated metrics | numeric/entity provenance gate + deterministic fallback |
 | Budget exhaustion ($7.54) | hard per-run/per-day caps + cost report |
 | Account bans | pacing, no same-tenant parallelism, proxy isolation, alias rotation |

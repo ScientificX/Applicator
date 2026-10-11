@@ -92,9 +92,9 @@ Researched, verified, and **not needed for v1**. Kept because it is a real futur
 
 `deepseek-flash` (1M ctx, text+**image**, JSON mode verified, prompt-cache counters exposed, **$6.85 balance** at the last check), `deepseek-v4-pro` for escalation.
 
-**Local models run natively on the Windows host.** Ollama **0.40.3** is installed natively (`winget install Ollama.Ollama`, per-user, no admin) with `bge-m3` + `qwen3:8b` already in the Windows store; it was verified serving `127.0.0.1:11435` and takes the default `127.0.0.1:11434` the moment the WSL unit is retired (quirk below). `qwen3:14b` still to pull; `glm-4.7-flash`, 19 GB, is too big for the free VRAM and is not used. Host: Windows 11, Ryzen 7 7700, **31.1 GB RAM**, 133 GB free on `C:`; RTX 5060 Ti 16 GB (compute 12.0, driver 610.88, sm_120 -> Ollama-only for GPU); Patchright chromium 153 launches headless here. Server tuning moved from the WSL systemd unit to Windows user env vars (`OLLAMA_MAX_LOADED_MODELS=1`, `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`).
+**Local models run natively on the Windows host.** Ollama **0.40.3** is installed natively (`winget install Ollama.Ollama`, per-user, no admin) with `bge-m3` + `qwen3:8b` already in the Windows store; it owns `127.0.0.1:11434` since the WSL unit was retired on 2026-10-11 (quirk below) and answers with GPU-backed inference. `qwen3:14b` still to pull; `glm-4.7-flash`, 19 GB, is too big for the free VRAM and is not used. Host: Windows 11, Ryzen 7 7700, **31.1 GB RAM**, 133 GB free on `C:`; RTX 5060 Ti 16 GB (compute 12.0, driver 610.88, sm_120 -> Ollama-only for GPU); Patchright chromium 153 launches headless here. Server tuning moved from the WSL systemd unit to Windows user env vars (`OLLAMA_MAX_LOADED_MODELS=1`, `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`).
 
-**Local-port quirk, verified while moving off WSL [V]:** a service running *inside* WSL is republished on the Windows side by WSL's `wslrelay.exe`. `127.0.0.1:11434` was held by `wslrelay` proxying to the WSL Ollama, so the native server could not start (`bind: Only one usage of each socket address ... is permitted`) and Windows clients silently reached the WSL instance instead (it answered `0.16.1`). Retiring the WSL Ollama unit is therefore a precondition of the native setup (section 13). Historical readings elsewhere ("WSL RAM 15.9 GB", "no `.wslconfig`") are superseded: the host has 31.1 GB and `.wslconfig` is no longer load-bearing.
+**Local-port quirk, verified while moving off WSL [V]:** a service running *inside* WSL is republished on the Windows side by WSL's `wslrelay.exe`. `127.0.0.1:11434` was held by `wslrelay` proxying to the WSL Ollama, so the native server could not start (`bind: Only one usage of each socket address ... is permitted`) and Windows clients silently reached the WSL instance instead (it answered `0.16.1`). Retiring the WSL Ollama unit was therefore a precondition of the native setup, and was done on 2026-10-11 (section 13 item 5): the native server bound `11434` immediately and `doctor` reports the native build. Keep the rule for any future pair of hosts - never run two Ollamas. Historical readings elsewhere ("WSL RAM 15.9 GB", "no `.wslconfig`") are superseded: the host has 31.1 GB and `.wslconfig` is no longer load-bearing.
 
 ### 1.5 LLM layer (tiers & budget)
 
@@ -121,6 +121,8 @@ budget: { max_cost_per_run_usd: 1.00, max_cost_per_day_usd: 3.00 }   # balance i
 ```
 
 `cost.py` reads `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `cached_tokens`; every structured output is pydantic-validated with one retry then a deterministic fallback.
+
+**Thinking-model caveat [V] — measured on the Windows host:** `qwen3:8b` emits a *thinking* block before its answer, so a small `num_predict` returns an **empty** `response` (8 and 128 tokens returned nothing; the same prompt at 512 tokens spent `eval_count` 176 and finally answered). Any caller that wants a bare answer - classification, question normalisation, the answer cache - must pass `think: false` (verified: `response: "4"`, no thinking tokens) or budget for the thinking block. Otherwise the call "succeeds" with no content and the caller cannot tell it apart from a genuine empty answer.
 
 ## 2. Objective & funnel
 
@@ -351,10 +353,11 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 exits 0 (`all checks passed`, 1 WARN: `AGENT_TOKEN` unset by design); `uv run pytest -q` = **49 passed**
 with the G1 hunt layer in the tree (28 at the scaffold, +21 from `tests/test_discover.py` and
 `tests/test_checks.py`); Patchright chromium 153 launches headless; GPU reachable (RTX 5060 Ti,
-compute 12.0); the Ollama answer was still the WSL `0.16.1` - the native build is installed but
-blocked on the port (section 13 item 5); DeepSeek balance $6.85 against the $3.00/day cap;
+compute 12.0); Ollama `0.40.3` native owning `127.0.0.1:11434` - `doctor` reports
+`v0.40.3; 2 models: bge-m3:latest, qwen3:8b` and a GPU-backed prompt answers (sections 1.4,
+13 item 5); DeepSeek balance $6.85 against the $3.00/day cap;
 `uv 0.11.7`, `git 2.55.0.windows` and Ollama are per-user installs (no admin). MRs:
-`fix/windows-native-host` (host move, merged) and `feat/g1-hunt-layer` (G1, this branch).
+`fix/windows-native-host` (host move, merged) and `feat/g1-hunt-layer` (G1) - both merged.
 
 **G1 status — PARTIAL (2026-10-11).** Measured on the Windows host from a live hunt run: 3775 postings
 across five sources, 0 duplicate `(source, source_id)` rows, Workday postings carrying a req id 320/320.
@@ -388,7 +391,7 @@ The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; s
 | Workers Free-plan CPU limits | Workers Paid; keep handlers thin; heavy parsing stays in the agent |
 | Two-repo confusion (Python agent vs TS worker) | worker stays in `my-email-worker`; contract in `AGENT_ONBOARDING.md`; agent talks HTTP only |
 | Rich output dies on the Windows ANSI code page whenever it is captured (`jobagent doctor \| tail`, CI, log file) | `make_console()`: UTF-8 streams + no Rich legacy-Windows path; regression test in `tests/test_checks.py` |
-| A WSL-republished port shadows the native stack (observed: `wslrelay` holding 11434, blocking native Ollama and serving `0.16.1` to Windows clients instead) | retire the WSL Ollama systemd unit and confirm `/api/version` reports the native build before a run (section 13); keep only one Ollama per host |
+| A WSL-republished port shadows the native stack (observed 2026-10-11: `wslrelay` held 11434, blocking native Ollama and serving the WSL `0.16.1` to Windows clients instead) | **resolved** by retiring the WSL unit (section 13 item 5) - the native 0.40.3 now owns 11434. Rule kept: never run two Ollamas, and confirm `/api/version` reports the native build before a run |
 | WSL is retired but surprises remain in the docs/toolchain (`wsl --shutdown`, `.wslconfig`, Linux-only probes) | `doctor` is host-agnostic with a Windows branch (section 1.4); plan/workstream/AGENTS docs updated in the same MR; WSL stays only as a legacy checkout |
 | **Tenant site-slug resolution is the weak link (50%)** | measured at G1: the oracle finds tenants cheaply (16/50 candidates real) but slug templating resolved only 8 of 16. Mitigation: harvest slugs from company careers domains / syndicated apply URLs (the plan's inverted-first default), expand templates, and keep `status = site_unknown` rows instead of discarding confirmed tenants |
 
@@ -398,13 +401,13 @@ The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; s
 2. Approve the **canonical contact address** (the one that appears on applications and resumes) - default `favourotiger@toesk.uk`.
 3. Confirm **Workers Paid** (Free-plan CPU limits can drop email handlers).
 4. **Proxy creds** for the web channels (sticky, one per identity) - until supplied, `tenant_concurrency_cap = 1`.
-5. ~~Run `wsl --shutdown` from Windows after `.wslconfig` (28 GB) is written at G0~~ - **superseded by the move to a native Windows host**: `.wslconfig` is no longer load-bearing (section 1.4). Instead **retire the WSL Ollama service** - `sudo systemctl disable --now ollama` from inside WSL (the unit is `enabled`, so it comes back on every WSL start and re-squats `127.0.0.1:11434`) - then confirm `jobagent doctor` reports the native Ollama version.
+5. ~~Run `wsl --shutdown` from Windows after `.wslconfig` (28 GB) is written at G0~~ - **superseded by the move to a native Windows host**; **done 2026-10-11**: the WSL Ollama unit is retired (`sudo systemctl disable --now ollama`; it was `enabled`, so it would otherwise re-squat `127.0.0.1:11434` on every WSL start) and the native 0.40.3 owns the port - `jobagent doctor` reports `v0.40.3; 2 models: bge-m3:latest, qwen3:8b` and a GPU-backed prompt answers. Optional follow-up: the WSL model store (~24 GB under `/usr/share/ollama/.ollama`) is now orphaned and can be reclaimed when the distro is retired.
 6. **HAR captures** for each web-form channel (DevTools -> Network -> Preserve log -> complete one real application on a target tenant) -> `artifacts/har/`. Workday's is `G0-W`.
 7. Optional but useful: an initial **target company list** to seed G1/G3.
 8. *Deferred:* rotate the DeepSeek key and `AGENT_TOKEN`; onboard a sending subdomain if Appendix B is ever taken up.
 ## 14. Appendix A - verified vs assumed
 
-**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); the live response shapes of four non-Workday sources (Greenhouse and Ashby board APIs, Lever postings API, Remotive) and that **Remotive exposes no employer-ATS URLs** (so it cannot feed the inverted Workday harvest); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B). **After the move to a native Windows host (2026-10-11):** the host itself - native Ollama 0.40.3 serving either `127.0.0.1:11435` (WSL unit still holding 11434) or `11434`, 31.1 GB RAM, `C:` free space, Patchright chromium 153 headless launch, winget per-user installs, and the `wslrelay` port-squatting behaviour in section 1.4.
+**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); the live response shapes of four non-Workday sources (Greenhouse and Ashby board APIs, Lever postings API, Remotive) and that **Remotive exposes no employer-ATS URLs** (so it cannot feed the inverted Workday harvest); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B). **After the move to a native Windows host (2026-10-11):** the host itself - native Ollama 0.40.3 owning `127.0.0.1:11434` with GPU-backed inference (`qwen3:8b` resident in ~8.5 GB VRAM; `think: false` and a 512-token budget both verified), 31.1 GB RAM, `C:` free space, Patchright chromium 153 headless launch, winget per-user installs, and the `wslrelay` port-squatting behaviour in section 1.4 - observed 2026-10-11 and resolved by retiring the WSL unit.
 
 **Assumed / to verify** (owner = which doc resolves it):
 

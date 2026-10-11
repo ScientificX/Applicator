@@ -189,12 +189,12 @@ source poll -> postings -> title_gate/visa -> matches -> resume -> resumes
 - **Stage-split scheduler.** Ollama-hot batches (classification/normalisation) run separately
   from browser-hot batches, with `OLLAMA_KEEP_ALIVE=0` before browser work, so a 16 GB GPU and
   the host's 31 GB of RAM are not contended (`plan-workday.md` §16).
-- **One host, one `localhost`.** The agent, Chromium and - once the WSL Ollama unit is retired -
-  Ollama all run natively on the Windows host, so `OLLAMA_BASE=http://localhost:11434` needs no
-  host-IP lookup and no WSL boundary crossing. Until that unit goes, WSL's relay owns port 11434
-  and the native server has to run on an alternate port. This is deliberate: a service running
-  *inside* WSL is republished by WSL's `wslrelay.exe` on the Windows side, which both shadows the
-  port for Windows clients and blocks a native process from binding it (`plan-general.md` §1.4).
+- **One host, one `localhost`.** The agent, Chromium and Ollama all run natively on the Windows
+  host, so `OLLAMA_BASE=http://localhost:11434` needs no host-IP lookup and no WSL boundary
+  crossing; the WSL Ollama unit was retired on 2026-10-11 to make that true. Why it mattered: a
+  service running *inside* WSL is republished by WSL's `wslrelay.exe` on the Windows side, which
+  both shadows the port for Windows clients and blocks a native process from binding it
+  (`plan-general.md` §1.4, §12).
 - **Pacing and concurrency.** Per-host politeness (1-2 concurrent, jitter), per-identity daily
   caps, per-tenant `tenant_concurrency_cap` (forced to 1 while no proxy pool exists), and a
   global politeness budget.
