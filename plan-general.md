@@ -30,7 +30,8 @@ Your `my-email-worker` (`src/index.ts`, 11.3 KB TS, deployed at `my-email-worker
 - `postal-mime` inbound parse -> KV `EMAIL_CACHE`; forwards a copy to `FORWARD_TO` (Gmail); `HANDLED_ADDRESSES` allow-list (`@toesk.uk`); spam-keyword scoring (`SPAM_KEYWORDS`/`SPAM_THRESHOLD`).
 - Bearer `AGENT_TOKEN` auth on `GET /emails`, `GET /latest`, `GET /email`, `DELETE /email`; CORS enabled; `OPTIONS` -> 204.
 - KV key `inbox:<recipient>:<subject-slug>:<ISO>-<uuid>` plus a `latest:` pointer. **Storage is indexed by recipient**, and the `<subject-slug>` (lowercase, hyphenated, <=48-char subject snippet) means a message can be identified **from its key alone, without reading the body** - that is the attribution handle (section 6.2).
-- `GET /emails` returns keys + metadata only, and the metadata carries the **full** `subject`, `from` and `receivedAt` - enough to attribute most ATS mail without ever reading a body.
+- `GET /emails` returns keys + metadata only, and the metadata carries the **full** `subject`, `from` and `receivedAt` - enough to attribute most ATS mail to a **company** without reading a body.
+- **Real sample [V] (2026-10-11):** an ATS ack in KV read `Thank you for your interest in Citi!` - a company signal with **no role and no req id**. Company-level attribution from the subject is real; application-level attribution usually needs the body (section 6.2).
 - `401` missing/bogus bearer, `400` missing param, `404` not found, `500` KV error. Round trip ~50-90 ms.
 - Vitest + `@cloudflare/vitest-plugin` (`test/index.spec.ts`); `wrangler.jsonc` has `addresses: ["nimagio@toesk.uk"]` and `HANDLED_ADDRESSES: "@toesk.uk"`.
 - **No `send_email` binding, no outbound route, no D1.** Good - nothing to undo.
@@ -61,7 +62,7 @@ Researched, verified, and **not needed for v1**. Kept because it is a real futur
 | **Track** | ATS status mail + human replies arriving at the worker |
 | **Learn** | feed response rate per channel/company/source back into Route and Rank |
 
-**Headline metric: response rate per channel and per source** - measured from inbound ATS mail, not guessed. Supporting: apps/day, cost/app, time-to-apply after posting, zero duplicate applications, attribution accuracy and unattributed rate.
+**Headline metric: response rate per channel and per source** - measured from inbound ATS mail, not guessed. Supporting: apps/day, cost/app, time-to-apply after posting, zero duplicate applications, **company-level attribution rate**, **application-level attribution rate**, unattributed rate.
 
 ## 3. Channels
 
@@ -135,27 +136,35 @@ Why no per-application addresses: a recruiter-visible `app-8f3c@...` looks like 
 
 Rules: **never `+`-tagged** (some Workday validators reject plus-addressing); rotate an address only when it is burned, and keep history so older accounts stay recoverable.
 
-### 6.2 Attribution from the KV key (the mechanism)
+### 6.2 Attribution from the KV key (the mechanism) - two tiers
 
-`inbox:<recipient>:<subject-slug>:<ISO>-<uuid>` - the `<subject-slug>` is a lowercase, hyphenated, **<=48-char** snippet of the subject. ATS subjects routinely name the company and the role ("Acme Corp - Senior Java Engineer: Application Received"), so the slug is a ready-made attribution handle, and **`GET /emails` returns keys + metadata without reading bodies**.
+`inbox:<recipient>:<subject-slug>:<ISO>-<uuid>` - the `<subject-slug>` is a lowercase, hyphenated, **<=48-char** snippet of the subject. `GET /emails` returns keys + metadata without reading bodies, and metadata carries the **full subject**, `from` and `receivedAt`.
 
-Algorithm, cheapest signal first:
+**Resolution happens in two tiers, because real ATS mail identifies the *company* far more reliably than the *application*.** Observed sample: an actual ack in KV had the subject `Thank you for your interest in Citi!` - company signal, no role, no req id.
+
+**Tier 1 - company (usually one request, body-free):**
 
 1. **List** `GET /emails?recipient=<address>` -> keys + metadata (`from`, **full** `subject`, `receivedAt`). Sort client-side by `receivedAt`; never assume KV list order is chronological.
-2. **`from` domain -> company/ATS**: `*.myworkdayjobs.com` yields the tenant directly (`nvidia.wd5...`); `*.greenhouse.io`, `hire.lever.co`, `*.ashbyhq.com` identify the family; the token in `from` or the body links identifies the company. This alone usually narrows to one company.
-3. **Subject slug + full subject -> role/req id**: extract an explicit req id (`JR2018784`, `REQ-12345`, `#123456`) or match the role title against that company open applications.
-4. **Join** to `applications` on `(company, role|req_id)`, constrained by `submitted_at <= receivedAt` within a window; accept when a single candidate remains, record `match_confidence`, and queue ambiguous cases for review instead of guessing.
-5. **Body read only on failure**: `GET /email?key=` -> parse the role/req/company out of the text. Bodies are read lazily; most attribution never needs them.
+2. **`from` domain -> ATS/company**: `*.myworkdayjobs.com` yields the tenant directly (`nvidia.wd5...` -> `nvidia`); `*.greenhouse.io`, `hire.lever.co`, `*.ashbyhq.com` identify the family; combined with a company token in the subject (as in the Citi sample) this is normally conclusive.
 
-Verification mail is the one case where the body **is** always read: the signup flow needs the code or link (see `plan.md` onboarding state machine).
+**Tier 2 - application (body read is a normal step here, not a fallback):**
 
-**Known limits, designed around:** the slug is truncated at 48 chars, so a verbose subject can clip the role - hence the full subject from metadata, then the body, are the fallbacks. And an ATS that sends a bare "Thank you for your application" (no company or role in subject *or* body) is attributable only by `from` domain + time window; those land as `match_confidence: low` and count toward the `unattributed` metric rather than being silently forced onto a wrong application.
+3. **Req id in the subject** - best case, exact match: `JR2018784` lines up with Workday `bulletFields[0]`.
+4. **Body read** `GET /email?key=` - ATS acks almost always name the role and/or requisition inside the body even when the subject does not. Use `text` first, and **fall back to tag-stripped `html`, since some senders omit `text` entirely**.
+5. **Links in the body** - a portal link often carries `jobPostingId` / `externalPath`, which is a hard identifier; parse it before trusting prose.
+6. **Time window** - constrain candidates to `submitted_at <= receivedAt` within a window and prefer the oldest unmatched application at that company.
+7. **Resolve or escalate** - one candidate left -> accept, record `match_confidence`; several left -> `low`, queue for review, count toward `unattributed`. Never guess.
 
+Verification mail is attributed to an **account**, not an application, and always requires the body (the code/link).
+
+**Persistence rule:** read -> parse -> **persist to the agent DB** -> *then* `DELETE`. Mail whose attribution is unresolved stays in KV rather than being deleted, so a read-once wipe cannot destroy evidence.
+
+**Known limits, designed around:** the slug truncates at 48 chars, so a verbose subject clips the role (full subject in metadata, then body, are the fallbacks); company-only acks like the Citi sample are common and are exactly why tier 2 exists; and an ack with no company, role, links or req id anywhere is attributable only by `from` domain + time window, landing as `match_confidence: low`.
 ### 6.3 Analytics & client etiquette
 
 - Every mail is classified (`ack`, `status_change`, `rejection`, `interview`, `assessment`, `verification`, `other`) and joined as above -> **response rate per channel / company / source**, the number that drives Route and Rank.
 - Hard bounces of our address from an ATS host -> flag it, stop using that address for that ATS.
-- Etiquette (non-negotiable, from `AGENT_ONBOARDING.md`): URL-encode `recipient`/`key`; `DELETE` after read (read-once); `drain()` before a flow; reject anything with `receivedAt < flow_start`; idempotency on `message_id`; use `/latest` only when the single newest message is genuinely what you want - otherwise list and sort by `receivedAt`.
+- Etiquette (from `AGENT_ONBOARDING.md`): URL-encode `recipient`/`key`; `drain()` before a flow; reject anything with `receivedAt < flow_start`; idempotency on `message_id`; use `/latest` only when the single newest message is genuinely what you want - otherwise list and sort by `receivedAt`. **The read-once `DELETE` is deferred until attribution is resolved and persisted (persistence rule in section 6.2).**
 ## 7. What actually prevents auto-rejection (honest version)
 
 The levers, ordered by impact:
@@ -213,8 +222,8 @@ Supersedes `plan.md` section 14 where they differ:
 | **G0** | Repo scaffold (uv, py3.13), config, migrations, CLI, `doctor`; `.wslconfig` 28 GB; Ollama tuned + `bge-m3` | `doctor` green |
 | **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | new postings detected <= 60 min after posting; dedupe clean |
 | **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
-| **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, ATS account signup + verification through the worker, inbound ack attributed back to the application | 5 real applications submitted; every inbound ack attributed with `match_confidence >= high`; unattributed count reported |
-| **G4** | **Inbound analytics**: subject-key attribution, classification, response-rate report per channel/company/source | report matches a manual spot-check of 20 applications; unattributed rate < 10% |
+| **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, ATS account signup + verification through the worker, inbound ack attributed back to the application | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
+| **G4** | **Inbound analytics**: two-tier attribution (company, then application), classification, response-rate report per channel/company/source | report matches a manual spot-check of 20 applications; company-level attribution >= 95%; application-level target >= 80%, remainder explicitly `low`/review |
 | **G5** | **Workday channel** (`plan.md` M1a-M6) as the web-form reference | see `plan.md` acceptance rows |
 | **G6** | **Autonomy + hardening**: scheduler caps, identity rotation, canary, cost report, prune/backup, runbook | 7-day unattended soak; zero duplicate applications; attribution accuracy >= 95% |
 | *(deferred)* | *Email as a submission channel* | *Appendix B - not scheduled* |
@@ -224,7 +233,7 @@ Supersedes `plan.md` section 14 where they differ:
 | Risk | Mitigation |
 |---|---|
 | Burner-looking address -> ATS rejection | one stable, name-based address used consistently on every application and resume (section 6.1) |
-| Attribution fails (vague subject, no req id, company unnamed) | multi-signal join: `from` domain -> company, subject slug + full subject -> role, then time window; record `match_confidence` and report an `unattributed` metric instead of guessing |
+| Application-level attribution fails (subject names the company but not the role - observed: `Thank you for your interest in Citi!`) | two-tier resolution: tier 1 `from` domain + subject company token; tier 2 body read + portal-link id + time window; record `match_confidence` and report an `unattributed` metric instead of guessing |
 | 48-char subject slug clips the role | fall back to the full subject in KV metadata, then the body text; never attribute from a truncated slug alone |
 | ATS mail mis-classified | sample audit each week; keep `confidence`; fall back to `other` and queue for review |
 | KV fills up (entries never expire) | agent prunes on read; add retention + optional D1 at volume |
@@ -245,10 +254,10 @@ Supersedes `plan.md` section 14 where they differ:
 
 ## 14. Appendix A - verified vs assumed
 
-**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design supports attribution without reading bodies (`<subject-slug>` in the key, full subject in metadata); inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B).
+**Verified:** the worker's current shape, routes, auth, KV key format and test setup; the **catch-all** on `toesk.uk` (confirmed); that the key/metadata design gives a company-level attribution handle without reading bodies (`<subject-slug>` in the key, full subject in metadata); a real ATS ack subject (`Thank you for your interest in Citi!`) showing company-level signal with no role/req id; inbound limits (25 MiB, 200 rules/domain, 200 destinations/account, >100 References throws on `reply()`); the `cxs` oracle and response schema; DeepSeek models / JSON mode / cache counters / balance; hardware and Ollama state; Cloudflare outbound-sending capability and limits (Appendix B).
 
 **Assumed / to verify:**
-- Whether ATS subjects/senders consistently expose company + role - measured by the `unattributed` metric in G4; the design degrades to body reads and time windows rather than guessing (`[?]`).
+- Whether ATS **bodies** reliably name the role/req id - the Citi sample suggests the subject often will not. Measured in G4 by the application-level attribution rate; the design degrades to portal-link parsing and time windows rather than guessing (`[?]`).
 - How ATS spam heuristics weight aliased vs plain addresses (`[?]` - moot for attribution now; the single stable address removes the variable anyway).
 - Non-Workday ATS apply endpoints (Greenhouse/Ashby apply POSTs are undocumented internals, same as Workday - `[?]` verify by HAR).
 - Whether ATS status mail consistently includes a req id/title that lets us disambiguate several applications at the same company (`[?]` - fall back to `submitted_at` window matching).
