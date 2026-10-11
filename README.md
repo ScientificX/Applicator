@@ -19,8 +19,12 @@ actually gets responses.
 
 ## Current state
 
-`PS-5.4` - **G0 landed**: `uv`/Python 3.13 scaffold, typed config, SQLite schema v1, `doctor`,
-and the criteria title gate + test battery. Next action: **G1** (hunt layer) via gate H1a.
+`PS-5.4` — **G0 landed and re-verified on the Windows host**: `uv`/Python 3.13 scaffold, typed
+config, SQLite schema v1, `doctor`, and the criteria title gate + test battery. The runtime
+host is now **native Windows 11** (agent + Chromium natively, and Ollama natively once the WSL
+unit is retired so it can take `localhost:11434`); WSL is no longer the platform of record.
+`doctor` exits 0 with one WARN (`AGENT_TOKEN` unset), `pytest -q` is 28 passed. Next action:
+**G1** (hunt layer) via gate H1a.
 
 
 ## Rules of the doc set
