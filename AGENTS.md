@@ -29,10 +29,13 @@ Pipeline: **hunt -> rank -> tailor -> route -> execute -> track -> learn**.
 - Browsers/HTTP: **Patchright** (patched Playwright) + **curl_cffi**.
 - Mail: **`my-email-worker`** (Cloudflare Worker, sibling repo) — **inbound only**;
   the agent talks to it over HTTP.
-- Current stage: **`PS-5.4`; `G0` met, `G1` in progress** on `feat/g1-hunt-layer` (hunt layer +
-  Workday `cxs` discovery: `net.py`, `models.py`, `discover/`). **`G2..G6` are not built.**
-  Status of record is `plan-general.md` section 11: `G0` met, `G1` **partial** (8 live tenants vs
-  the >= 20 target; site-slug resolution 50% vs >= 80%). Do not treat G1 as closed.
+- Current stage: **`PS-5.4`; `G0` met, `G1` met except one unmeasured clause** on
+  `feat/g1-tenant-gap` (hunt layer + Workday `cxs` discovery: `net.py`, `models.py`, `discover/`).
+  **`G2..G6` are not built.**
+  Status of record is `plan-general.md` section 11: `G0` met; the `G1` tenant metrics are met and
+  measured (**71 live tenants** vs >= 20; site-slug resolution **71/72 = 98.6%** vs >= 80%), while
+  the "<= 60 min after posting" freshness clause is **unmeasured** until the G6 scheduler exists.
+  Gate `H1a` passed; **G2 is the next stage**.
 
 ## 2. Where the truth lives (read these; do not restate them)
 

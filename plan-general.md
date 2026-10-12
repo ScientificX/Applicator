@@ -138,7 +138,7 @@ budget: { max_cost_per_run_usd: 1.00, max_cost_per_day_usd: 3.00 }   # balance i
 
 **Headline metric: response rate per channel and per source** - measured from inbound ATS mail, not guessed. Supporting: apps/day, cost/app, time-to-apply after posting, zero duplicate applications, **company-level attribution rate**, **application-level attribution rate**, unattributed rate.
 
-**Measured at G1 (2026-10-11):** postings stored **3775** (greenhouse 2119, ashby 1008, workday 320, lever 310, remotive 18); duplicate `(source, source_id)` rows **0**; Workday postings carrying a req id **320/320**; live tenants **8 of 16** confirmed tenants (site-slug resolution 50%); `doctor` green. **Not measured:** time-to-apply after posting (no scheduler until G6), reply rates (G3/G4).
+**Measured at G1 (2026-10-12, tenant layer):** Workday tenant discovery over **202** seed slugs -> **71 live tenants / 72 known** across 14 of 21 shard candidates, site-slug resolution **71/72 = 98.6%** and **0 manual entries** (62 slugs came from `GET /robots.txt`, 0 from templates, 1 tenant `site_unknown`); **4021** Workday postings stored from those tenants, **4021/4021** carrying a req id, **0** duplicate `(source, source_id)` rows across all sources. The 2026-10-11 reading was **3775** postings (greenhouse 2119, ashby 1008, workday 320, lever 310, remotive 18), Workday req ids 320/320, and only **8 of 16** tenants with 50% slug resolution - the pre-`robots.txt` number. `doctor` is green except the Ollama check while the local service is stopped. **Not measured:** new postings detected <= 60 min after posting (no scheduler until G6 - the freshness clause of the G1 acceptance row is **unmeasured**, not met) and reply rates (G3/G4).
 
 ### 2.1 Criteria (target profile) - `config/criteria.yaml`
 
@@ -341,7 +341,7 @@ Canonical model for the whole system. The workstream doc declares **extensions o
 | # | Scope | Hand-off (read) | Acceptance |
 |---|---|---|---|
 | **G0** | Scaffold: `uv` project (py3.13), `config/`, migrations, CLI, `doctor`; native-host preflight (RAM/GPU/Ollama/Chromium); Ollama tuned + `bge-m3` | `plan-workday.md` appendix - **G0-W**: HAR capture, engine smoke test, canary tenant pick | `doctor` green (Ollama + GPU + models, mail API, Patchright, DeepSeek balance + budget) - **MET 2026-10-11**, re-verified on the Windows host (status below) |
-| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean - **PARTIAL 2026-10-11**: 3775 postings stored (greenhouse 2119, ashby 1008, workday 320, lever 310, remotive 18), **0 duplicate `(source, source_id)` rows**, Workday req ids **320/320**; **tenant half NOT met**: 8 live tenants vs >= 20, site-slug resolution 8/16 = 50% vs >= 80% (gap row in section 12). Gate **H1a not passed** |
+| **G1** | **Hunt layer**: 3 non-Workday ATS families + 1 aggregator, freshness engine, unified posting model, cross-source dedupe | **H1a -> `plan-workday.md` sections 6-7** (`G1-W1`, `G1-W2`) | new postings detected <= 60 min after posting; dedupe clean - **MET except the freshness clause 2026-10-12**: **4021** Workday postings from the **71 live tenants**, all **4021 active**, req id **4021/4021**, **0 duplicate `(source, source_id)` rows** across all sources; **tenant half now met**: **71 live tenants / 72 known vs >= 20**, site-slug resolution **71/72 = 98.6% vs >= 80%**, **zero manual entries** (2026-10-11, for the record: 3775 postings, 8 tenants, 50% slugs). **"<= 60 min after posting" is not measured** - no scheduler exists until G6. Gate **H1a passed** |
 | **G2** | **Rank + tailor**: filters, visa, freshness weighting, select-and-patch resume, anti-exaggeration gates | - | 50-sample audit shows zero fabrications; provenance + entailment gates pass; `tailor_report.json` written |
 | **G3** | **Submission with worker addresses** (non-Workday ATS first): contact address on the form, account signup + verification via the worker | - | 5 real applications submitted; **100% of inbound acks attributed at company level**; `unattributed` count reported |
 | **G4** | **Inbound analytics**: two-tier attribution (company, then application), classification, response-rate report | - | report matches a manual spot-check of 20 applications; company-level >= 95%; application-level target >= 80% |
@@ -359,19 +359,23 @@ compute 12.0); Ollama `0.40.3` native owning `127.0.0.1:11434` - `doctor` report
 `uv 0.11.7`, `git 2.55.0.windows` and Ollama are per-user installs (no admin). MRs:
 `fix/windows-native-host` (host move, merged) and `feat/g1-hunt-layer` (G1) - both merged.
 
-**G1 status — PARTIAL (2026-10-11).** Measured on the Windows host from a live hunt run: 3775 postings
-across five sources, 0 duplicate `(source, source_id)` rows, Workday postings carrying a req id 320/320.
-The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; site-slug resolution
-8/16 = 50% vs >= 80%), so **H1a is not passed** (section 11.1) and the gap is a risk row in section 12.
+**G1 status — MET except one unmeasured clause (2026-10-12).** Measured on the Windows host from a live run: **71 live Workday tenants / 72 known** (**MET** the >= 20 target), site-slug resolution **71/72 = 98.6%** (**MET** the >= 80% target) with **zero manual entries**, **4021** Workday postings from those tenants with **4021/4021** carrying a req id and **0** duplicate `(source, source_id)` rows across all sources - the dedupe-clean clause is **met**. The earlier 2026-10-11 reading (3775 postings, 8 live tenants, 50% slugs, 320 Workday postings) is superseded for the tenant half; what reopened the gap was two discovery defects now fixed and recorded: `GET /robots.txt` publishes the exact site slugs (`plan-workday.md` 6.5), and the shard sweep was testing the bare `{shard}` apex, which false-negatived more than half of the live shards (`plan-workday.md` 6.2). **Not met:** the "<= 60 min after posting" freshness clause is **unmeasured** (no scheduler until G6), so the G1 acceptance row is met on every clause except that one. **Deviation:** the `TenantSource` that shipped is `SeedTenantSource` (seed slugs + oracle), **not** the `WorkdayTenantDiscovery` inverted aggregator harvest the exit condition names - that source and facet-based ranking are still planned.
 
 ### 11.1 Gates (the seam in detail)
 
 **H1a - discovery seam (enters G1).** Workday discovery lands first because it is cheap: no browser, no accounts, no mail. *Preconditions:* the general `DiscoverySource` protocol plus `postings` / `companies` / `tenant_probes` / `shards` migrations are landed, and the `curl_cffi` client wrapper exists. *Exit:* `WorkdayCxsDiscovery` and `WorkdayTenantDiscovery` pass their acceptance rows, and the hunt layer consumes them through the protocol with no Workday-specific branches.
 
-> **Status 2026-10-11 — OPEN (partial).** Preconditions are met and both classes exist; the hunt
-> layer consumes them with no Workday branches (exit condition 2 **met**). Acceptance rows are
-> **not** met: 8 live tenants against the >= 20 target, and site-slug resolution 8/16 = 50%
-> against >= 80%. **The gate is not passed**, and the gap is a risk row in section 12.
+> **Status 2026-10-12 — acceptance rows met; gate PASSED on the clause the plan blocked it for.**
+> Preconditions are met and both classes exist; the hunt layer consumes them with no Workday
+> branches (exit condition 2 **met**). The tenant acceptance row is now **met and measured**: **71
+> live tenants vs >= 20**, **71/72 = 98.6% slug resolution vs >= 80%**, **zero manual entries**
+> (`plan-workday.md` 6.2/6.5 record the two fixes; evidence: a live `jobagent tenants --discover`
+> run -> 202 candidates, 2246 cached probes, 71 live, plus `jobagent discover --family workday`
+> -> 4021 postings, 0 duplicates, 4021/4021 req ids and `pytest -q` = 57 passed).
+> Two honest caveats: (1) the class the exit condition names, `WorkdayTenantDiscovery`, is **not**
+> what shipped - the working source is `SeedTenantSource`, so the inverted aggregator harvest and
+> facet ranking remain planned; (2) the G1 acceptance row's "<= 60 min after posting" freshness
+> clause is still **unmeasured** (no scheduler until G6). Neither blocks entry to G2.
 
 **H1b - apply seam (enters G5).** *Preconditions:* G3 proven end to end on a non-Workday channel; attribution working on real mail **including at least one Workday ack** (tier 1 at minimum); the address model live; per-identity proxies assigned; **HAR captured**; `doctor` green; budget caps in place. *Exit:* `WorkdayWebApply` satisfies the `ApplyChannel` protocol; `--dry-run` reaches Review with zero manual inputs; parks are first-class outcomes rather than errors.
 
@@ -393,7 +397,8 @@ The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; s
 | Rich output dies on the Windows ANSI code page whenever it is captured (`jobagent doctor \| tail`, CI, log file) | `make_console()`: UTF-8 streams + no Rich legacy-Windows path; regression test in `tests/test_checks.py` |
 | A WSL-republished port shadows the native stack (observed 2026-10-11: `wslrelay` held 11434, blocking native Ollama and serving the WSL `0.16.1` to Windows clients instead) | **resolved** by retiring the WSL unit (section 13 item 5) - the native 0.40.3 now owns 11434. Rule kept: never run two Ollamas, and confirm `/api/version` reports the native build before a run |
 | WSL is retired but surprises remain in the docs/toolchain (`wsl --shutdown`, `.wslconfig`, Linux-only probes) | `doctor` is host-agnostic with a Windows branch (section 1.4); plan/workstream/AGENTS docs updated in the same MR; WSL stays only as a legacy checkout |
-| **Tenant site-slug resolution is the weak link (50%)** | measured at G1: the oracle finds tenants cheaply (16/50 candidates real) but slug templating resolved only 8 of 16. Mitigation: harvest slugs from company careers domains / syndicated apply URLs (the plan's inverted-first default), expand templates, and keep `status = site_unknown` rows instead of discarding confirmed tenants |
+| ~~Tenant site-slug resolution is the weak link (50%)~~ - **CLOSED 2026-10-12** | Root-caused and fixed at G1: `GET /robots.txt` publishes the exact site slugs, and the shard sweep had been testing the bare `{shard}` apex (which false-negatived >half the live shards). Measured after the fix: **71/72 = 98.6%** slug resolution, **71 live tenants**, zero manual entries (`plan-workday.md` 6.2/6.5). Residual work: the inverted aggregator harvest (6.3) and browser escalation for the remaining `site_unknown` tenant |
+| The G1 "<= 60 min after posting" freshness clause is still **unmeasured** (no scheduler until G6) | measure detection latency when the G6 scheduler lands; until then the clause stays recorded as "not measured" rather than assumed - do not treat G1 as fully evidenced |
 
 ## 13. Human actions
 
@@ -418,7 +423,7 @@ The tenant half of the acceptance row is **not** met (8 live tenants vs >= 20; s
 | ATS spam heuristics vs aliased vs plain addresses | general | moot for attribution now - the single stable address removes the variable |
 | Non-Workday ATS apply endpoints (Greenhouse/Ashby apply POSTs are undocumented internals) | general | HAR per channel |
 | Workday job-detail and apply-flow endpoints | `plan-workday.md` | HAR at `G0-W` |
-| Does `curl_cffi impersonate="chrome"` clear the Workday landing-page 406? | `plan-workday.md` | probe at `G1-W1` |
+| Does `curl_cffi impersonate="chrome"` clear the Workday landing-page 406? | `plan-workday.md` | **answered at G1 (2026-10-12): no** - the bare host still returns `406` with 0 bytes when impersonated. But `GET /robots.txt` **is** served and publishes the exact site slugs, which is what actually resolves them - mirrored into `docs/design.md` 8.2 and `plan-workday.md` 6.5 |
 | Account daily **sending** quota, Message-ID exposure, header permissions | general | only relevant if Appendix B is taken up |
 ## 15. Appendix B - DEFERRED OPTION: email as a submission channel
 

@@ -51,7 +51,7 @@ at the gates below.
 | `total` | Caps at **2000** (NVIDIA Engineering alone = 1720) -> **size tenants by `facets`, never `total`** |
 | Discovery oracle | **200** valid - **404 `{"errorCode":"S21","message":"not found: Job_Posting_Site_ID=X"}`** = tenant real, site slug wrong - **422 `{"errorCode":"HTTP_422"}`** = no such tenant |
 | Drift canary | `errorCaseId` is unique per request -> alert if the error envelope changes |
-| DNS | `*.wdN.myworkdayjobs.com` wildcard resolves for **any** slug (incl. bogus); `wd11` = NXDOMAIN -> shard set enumerable, tenant existence only via `cxs` |
+| DNS | Per-tenant DNS proves nothing: `*.wdN.myworkdayjobs.com` resolves for **any** label (incl. bogus). **[V] corrected 2026-10-12:** the **shard** test is a *bogus label under the shard* (`wd-shard-probe.{shard}.myworkdayjobs.com`) - 14/21 candidates live; the bare **apex** `{shard}.myworkdayjobs.com` is **not** a signal (absent for live `wd12`/`wd501`/`wd103`, present for dead `wd11`), and an apex-based sweep found only 4/21 and missed real tenants. Tenant existence only via `cxs` |
 | Root `/` | **[V] 406 with 0 bytes even under `curl_cffi impersonate="chrome"`** - the bare host is never usable. `/en-US` -> 404; `/en-US/{site}` -> 200 with the site slug present in the HTML. |
 | Job detail, apply flow | [?] **VERIFY from HAR at `G0-W`** - the only remaining unknown |
 | DeepSeek | `deepseek-flash` = V4.1-Flash: **1,048,576 ctx**, 393,216 max out, **text+image** input, `effort: low|high|max` (default high). `deepseek-v4-pro` exists (text-only). `deepseek-chat` is an alias -> **pin literal ids** |
@@ -76,7 +76,7 @@ Discover Workday tenants -> discover matching reqs -> rank -> tailor one resume 
 | LLM calls per application | <= 2 |
 | Submit rate | >= 80% |
 | Park rate | < 10%, never blocks other tenants |
-| Tenant discovery | >= 20 live tenants, >= 80% correct site slugs, **zero manual entries** |
+| Tenant discovery | >= 20 live tenants, >= 80% correct site slugs, **zero manual entries** - **MET 2026-10-12: 71 live / 72 known tenants, site-slug resolution 71/72 = 98.6%, 0 manual entries** (202 seed slugs; 62 slugs from `/robots.txt`, 1 `site_unknown`) |
 
 ## 3. Criteria and targeting
 
@@ -115,7 +115,7 @@ in `plan-general.md`; this channel is a consumer of it, not an owner.
 | 404 `S21` | **tenant exists**, site slug wrong | brute slug candidates; else browser/aggregator escalation |
 | 422 | no such tenant | negative-cache 30 days |
 
-**6.2 Shard discovery** - enumerate `wdN` via DNS once, cache resolvers, learn new shards from observed hosts. Free and definitive.
+**6.2 Shard discovery** - `shard_sweep()` resolves a **bogus label** under each `wdN` candidate (`wd-shard-probe.{shard}.myworkdayjobs.com`): only a live shard's wildcard record answers, so this is free and definitive. **[V] corrected at G1 (2026-10-12):** the bare apex `{shard}.myworkdayjobs.com` must **not** be used - it is missing for live shards (`wd12`, `wd103`, `wd501`) and present for shards that are not real (`wd11` -> an unrelated 34.213.x host), so an apex sweep reported **4/21** live shards and silently never probed the tenants on the other ten. The wildcard test reports **14/21** (`wd1, wd3, wd5, wd10, wd12, wd103, wd105, wd108, wd115, wd116, wd117, wd120, wd501, wd503`; dead: `wd2, wd4, wd6-wd9, wd112`). The live set is cached in `shards`, and new shards are learned from observed hosts.
 
 **6.3 Inverted source (default)** - aggregator/JobSpy results for the criteria -> harvest Workday apply URLs -> yields `host + tenant + site + externalPath` **and** proof of active hiring. Zero blind probing. Use the 200 response's `facets` (locations, `jobFamilyGroup`) to score tenant yield -> onboard identities only where yield justifies an account.
 
@@ -128,7 +128,7 @@ class TenantSource(Protocol):
 
 Adding `BruteForceBreadthSource` (companies x slug variants x live shards, backed by `companies` + `tenant_probes`) or `CrtShCustomDomainSource` later = **one new class + one config entry**. The oracle, schema, and pipeline are unchanged; sources may run in parallel with weights. Inverted-only is today's default; both is a config change tomorrow.
 
-**6.5 Site-slug acquisition order** - **[V] corrected at G1:** the landing page **cannot discover a slug**. Bare `/` is 406 even impersonated, `/en-US` is 404, and `/en-US/{site}` requires the very slug being sought. Order: (1) aggregator/search URL or the company careers domain - exact and free, and the plan's inverted-first default; (2) generated candidate templates probed through the oracle, including separator/suffix forms (`{Pascal}_Careers` is what resolved cisco); (3) keep confirmed-but-unresolved tenants as `tenants.status = site_unknown` rather than discarding them.
+**6.5 Site-slug acquisition order** - **[V] corrected at G1:** the landing page **cannot discover a slug**, but `GET /robots.txt` **can**. The tenant host answers `/robots.txt` even where bare `/` is 406 (impersonated), and the file names the published site slugs **exactly** - `Sitemap:` lines and `Allow:`/`Disallow:` rules (`cisco/Cisco_Careers`, `nvidia/NVIDIAExternalCareerSite`, and `citi` publishes *only* `Disallow: /2/` - its slug is literally `2`). Bare `/` is 406 even impersonated, `/en-US` is 404, and `/en-US/{site}` requires the very slug being sought. Order: (1) **`/robots.txt`** - exact and free; it resolved **58 of 66** live tenants. Rules are parsed unfiltered because the oracle verifies every candidate (a non-site path segment simply fails its probe); a tenant may publish several sites (`equinix` lists 17, nvidia a research board beside its careers board), so each candidate is sized with `facet_size()` and the **largest board wins**, bounded by `MAX_ROBOTS_SITES`. (2) generated candidate templates probed through the oracle, including separator/suffix forms (`{Pascal}_Careers`, `{Pascal}ExternalCareerSite`); this is the fallback when `/robots.txt` is missing or publishes nothing usable (`template_resolved`). (3) aggregator/search URL or the company careers domain - exact and free, and the plan's inverted-first default (still planned, `G1-W1`). (4) keep confirmed-but-unresolved tenants as `tenants.status = site_unknown` rather than discarding them.
 
 ## 7. Job discovery (`discover/workday_cxs.py`)
 
@@ -228,7 +228,7 @@ Program stages live in `plan-general.md` section 11. Workday steps hang off them
 | Step | Stage | Scope | Acceptance |
 |---|---|---|---|
 | **G0-W** | G0 | HAR capture of one real Workday application; Patchright engine smoke test; canary tenant pick (Citi likely) | HAR saved to `artifacts/har/`; `data-automation-id` smoke test passes on a real tenant - **NOT DONE 2026-10-11**: HAR capture is still outstanding; it is the `[?]` for the job-detail and apply-flow endpoints |
-| **G1-W1** | G1 | Tenant discovery: shard DNS, the 200/S21/422 oracle, slug candidates, inverted aggregator harvest, facet ranking | >= 20 live tenants auto-found, >= 80% correct site slugs, zero manual entries - **PARTIAL 2026-10-11**: oracle works (290 probes -> 16 real tenants, 9 of them `site_unknown`); **8 live vs the >= 20 target**, slug resolution **50% vs >= 80%** (gap row in `plan-general.md` section 12) |
+| **G1-W1** | G1 | Tenant discovery: shard DNS, the 200/S21/422 oracle, slug candidates, inverted aggregator harvest, facet ranking | >= 20 live tenants auto-found, >= 80% correct site slugs, zero manual entries - **MET 2026-10-12**: 202 seed slugs -> **71 live tenants / 72 known** over 2246 cached probes, site slugs resolved **71/72 = 98.6%** (62 via `/robots.txt` + oracle verification, 0 via templates, 1 `site_unknown`), **0 manual entries**. The 2026-10-11 reading (8 live, 50%, 290 probes) predates the `/robots.txt` slug source (6.5) and the corrected shard test (6.2) - those two fixes are what closed the gap. Still **planned**, not met: the inverted aggregator harvest and facet-based ranking (the `robots.txt` + template path is what runs today) |
 | **G1-W2** | G1 | Job discovery: `searchText` + `appliedFacets`, 20/page, incremental | criteria-matching reqs for 20 tenants < 3 min; re-run incremental - **MET (scope-adjusted) 2026-10-11**: 320 Workday postings stored from the 8 live tenants, 100% carrying `req_id`, 0 duplicates; the "20 tenants" wording is unreachable while W1 returns 8 |
 | **G5-W1** | G5 | Identity onboarding: alias mint, persistent context, account creation, mail-worker verification (code **and** same-context link), rotation | 3 tenants onboarded unattended; sessions survive restart |
 | **G5-W2** | G5 | Apply state machine, `--dry-run` to Review | 3 real jobs at Review with 0 manual inputs |
@@ -243,7 +243,7 @@ Program stages live in `plan-general.md` section 11. Workday steps hang off them
 | Risk | Mitigation |
 |---|---|
 | `cxs` endpoint drift | recorded fixtures + daily canary + `diff-traffic old.har new.har` |
-| Site-slug misses | inverted source eliminates most; oracle + browser escalation for the rest |
+| Site-slug misses | **mostly closed 2026-10-12**: `GET /robots.txt` names the sites exactly (6.5), taking slug resolution from 50% to **71/72 = 98.6%** with zero manual entries; the oracle verifies every candidate and confirmed-but-unresolved tenants are kept as `site_unknown`. Residual mitigation: the inverted aggregator harvest (6.3) and browser escalation |
 | Stale verification codes | drain + `since=flow_start` + delete-on-read + `message_id UNIQUE` |
 | CF blocks mass signup | 3-5 tenants/day, jitter, warmed profiles, `--headed` fallback |
 | sm_120 wheel breakage | Ollama-only for local GPU; `fastembed` CPU fallback |
@@ -272,5 +272,23 @@ Cross-channel actions are in `plan-general.md` section 13. Workday-only:
 - root `/` -> 406 with 0 bytes for **both** real and bogus hosts (needs browser-like TLS). `[?]` re-test with `curl_cffi impersonate="chrome"` at `G1-W1`
 - `limit:100` returned no `jobPostings` -> the limit is capped at **20**
 - NVIDIA reported `total: 2000` while its facets summed higher -> **treat `total` as a ceiling and use `facets`**
+
+### Probe log (2026-10-12) - site-slug discovery and the shard-test correction
+
+- **`GET /robots.txt` leaks the exact site slugs.** The tenant host serves it (even where bare `/`
+  is 406) and it names the published sites: `Sitemap: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/siteMap.xml`,
+  `Allow: /NVIDIAExternalCareerSite/`. Some tenants publish **only** `Disallow` rules - `citi`'s slug
+  is literally `2` (`Disallow: /2/`).
+- **Multi-site tenants must be sized, not guessed:** `nvidia` (careers + research board),
+  `citi` (main board `total: 2000` + a 24-req early-careers events site), `equinix` (17 sites).
+  Size with summed facet counts (`total` caps at 2000) and keep the largest.
+- **Shard test:** `wd-shard-probe.{shard}.myworkdayjobs.com` resolves **only** under a live shard ->
+  **14/21** live (`wd1, wd3, wd5, wd10, wd12, wd103, wd105, wd108, wd115, wd116, wd117, wd120, wd501, wd503`);
+  dead: `wd2, wd4, wd6-wd9, wd112`.
+- **Apex `{shard}.myworkdayjobs.com` is not a shard test** (this supersedes the 2026-10-11 line
+  "`wd11` NXDOMAIN -> shard set enumerable"): it **resolves for dead `wd11`** (34.213.254.87, an
+  unrelated host) and **NXDOMAINs for live `wd12`/`wd103`/`wd105`/`wd501`**; `wd1.myworkdayjobs.com`
+  resolves to `127.0.0.1` (local sinkhole) although `wd1` is live. An apex sweep therefore both
+  dropped real shards and admitted a fake one - `salesforce` lives on `wd12` and was never probed.
 
 Cross-channel probe results (mail worker, DeepSeek, hardware) are in `plan-general.md` sections 1 and 14.

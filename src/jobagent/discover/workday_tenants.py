@@ -11,15 +11,19 @@ three states, so tenant hunting is a guided search rather than blind guessing.
 | 404  | `{"errorCode":"S21"}`               | tenant exists, site slug wrong   |
 | 422  | `{"errorCode":"HTTP_422"}`          | no such tenant on this shard     |
 
-Verified during planning: DNS is NOT a validity test. `*.wdN.myworkdayjobs.com` resolves for any
-slug (wildcard per shard), while a non-existent *shard* (e.g. `wd11`) does not resolve at all. So
-DNS answers "which shards exist"; only `cxs` answers "does this tenant exist".
+Verified at G1: per-tenant DNS says nothing (wildcard), but the per-shard **wildcard label** is a
+valid *shard* test. A live shard answers for any label (`zzz.wd5.myworkdayjobs.com` resolves); a
+dead shard has no wildcard, so a bogus label NXDOMAINs (`wd11`, `wd9999`). The shard **apex** is
+*not* a signal - it is missing for live shards (`wd12`, `wd501`) and present for dead ones
+(`wd11` -> an unrelated host), so nothing may gate on `{shard}.myworkdayjobs.com`. Only `cxs`
+answers "does this tenant exist".
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import socket
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
@@ -35,6 +39,10 @@ SHARD_CANDIDATES: tuple[str, ...] = (
     "wd12", "wd103", "wd105", "wd108", "wd112", "wd115", "wd116", "wd117", "wd120",
     "wd501", "wd503",
 )
+
+# DNS label used to test whether a shard exists: it must never be a real tenant, and it only
+# resolves where the shard's own wildcard record exists.
+SHARD_PROBE_LABEL = "wd-shard-probe"
 
 SITE_TEMPLATES: tuple[str, ...] = (
     "{Pascal}ExternalCareerSite",
@@ -60,6 +68,46 @@ SITE_TEMPLATES: tuple[str, ...] = (
 
 ANTI_BOT_MARKERS = ("Just a moment", "cf-challenge", "Attention Required")
 
+# --- site-slug discovery via /robots.txt (plan-workday.md 6.5, verified at G1) -------------
+#
+# Workday serves `/robots.txt` even when the bare host answers 406 with an empty body, and that
+# file names the tenant's published site slugs *exactly* - no guessing:
+#
+#   Sitemap: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/siteMap.xml
+#   Allow: /NVIDIAExternalCareerSite/
+#   Disallow: /2/                <- `citi` publishes ONLY Disallow rules (its slug is literally `2`)
+#
+# A tenant may publish several sites (nvidia also has a research board; citi an early-careers
+# board), so candidates are verified through the oracle and then sized - the biggest wins.
+ROBOTS_PATH = "/robots.txt"
+MAX_ROBOTS_SITES = 12  # bound the probe fan-out for many-site tenants (equinix lists 17)
+
+_SITEMAP_RE = re.compile(r"/([A-Za-z0-9][A-Za-z0-9_\-]*)/siteMap\.xml")
+_RULE_RE = re.compile(r"^(?:Allow|Disallow):\s*/([A-Za-z0-9][A-Za-z0-9_\-]*)", re.MULTILINE)
+
+
+def parse_robots_sites(body: str | None) -> list[str]:
+    """Exact site slugs named by a Workday robots.txt, in file order and deduped.
+
+    Sitemap lines come first: they are the canonical published sites. Rule lines follow and are
+    deliberately unfiltered - the oracle verifies every candidate, so a path segment that is not
+    a site (`refreshFacet`, `talentcommunity`) simply fails its probe and is dropped.
+    """
+    ordered: list[str] = []
+    for pattern in (_SITEMAP_RE, _RULE_RE):
+        for match in pattern.finditer(body or ""):
+            slug = match.group(1)
+            if slug not in ordered:
+                ordered.append(slug)
+    return ordered
+
+
+def facet_size(harvested: dict[str, Any]) -> int:
+    """Size a tenant board. `total` caps at 2000, so fall back to the summed facet counts."""
+    reported = int(harvested.get("total_reported") or 0)
+    summed = sum(int(v) for v in (harvested.get("sizes") or {}).values())
+    return max(reported, summed)
+
 
 @dataclass(frozen=True)
 class ResolvedTenant:
@@ -79,11 +127,16 @@ class OracleStats:
     site_unknown: int = 0
     absent: int = 0
     unknown: int = 0
+    robots_sites: int = 0
+    robots_resolved: int = 0
+    template_resolved: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
             "probes": self.probes, "cached": self.cached, "live": self.live,
             "site_unknown": self.site_unknown, "absent": self.absent, "unknown": self.unknown,
+            "robots_sites": self.robots_sites, "robots_resolved": self.robots_resolved,
+            "template_resolved": self.template_resolved,
         }
 
 
@@ -136,9 +189,17 @@ def _resolves(host: str) -> bool:
 
 
 async def shard_sweep(shards: Iterable[str] = SHARD_CANDIDATES) -> dict[str, bool]:
-    """Which `wdN` shards exist. Regex-free DNS only - no HTTP, no tenant knowledge."""
-    results = await asyncio.gather(*(asyncio.to_thread(_resolves, f"{s}.myworkdayjobs.com") for s in shards))
+    """Which `wdN` shards exist. DNS only - no HTTP, no tenant knowledge.
+
+    Probes `{SHARD_PROBE_LABEL}.{shard}.myworkdayjobs.com`: only a live shard's wildcard record
+    answers for an arbitrary label. Never probe the bare `{shard}` apex - live shards `wd12` and
+    `wd501` have no apex record, so an apex test silently drops more than half of the real shards.
+    """
+    results = await asyncio.gather(
+        *(asyncio.to_thread(_resolves, f"{SHARD_PROBE_LABEL}.{s}.myworkdayjobs.com") for s in shards)
+    )
     return dict(zip(shards, results, strict=True))
+
 
 
 class SeedTenantSource:
@@ -259,6 +320,59 @@ class WorkdayOracle:
             sizes[param] = sum(int(v.get("count") or 0) for v in values)
         return {"facets": facets, "sizes": sizes, "total_reported": payload.get("total")}
 
+    async def robots_sites(self, slug: str, shard: str) -> list[str]:
+        """Site slugs named by the tenant's `/robots.txt`; `[]` if the file is missing/blocked.
+
+        Verified at G1 (plan-workday.md 6.5): the bare host 406s, but `/robots.txt` still answers
+        200 and names the *exact* published site slugs, which is what unlocks the tenants the
+        generated templates cannot guess (`NVIDIAExternalCareerSite`, `CorporateCareers`, `2`).
+        """
+        try:
+            async with self._sem:
+                resp = await self._client.get(f"https://{host_for(slug, shard)}{ROBOTS_PATH}")
+        except Exception:
+            return []
+        if not resp.ok:
+            return []
+        return parse_robots_sites(resp.text)
+
+    async def _best_of(self, slug: str, shard: str, candidates: Iterable[str]) -> tuple[str, dict[str, Any]] | None:
+        """Verify each candidate through the oracle; return the largest board (multi-site tenants)."""
+        live: list[str] = []
+        for site in candidates:
+            if site in live:
+                continue
+            _, verdict, _ = await self.probe(slug, shard, site)
+            if verdict == "live":
+                live.append(site)
+        if not live:
+            return None
+        sized: list[tuple[str, dict[str, Any]]] = []
+        for site in live:
+            sized.append((site, await self.harvest_facets(slug, shard, site)))
+        return max(sized, key=lambda item: facet_size(item[1]))
+
+    async def _resolve_site(self, slug: str, shard: str) -> tuple[str, dict[str, Any]] | None:
+        """Phase 2: find a working site slug (plan-workday.md 6.5 order).
+
+        `robots.txt` first - exact, and a tenant may publish several boards, so the candidates are
+        verified and then sized. Generated templates are the fallback and the first hit wins, which
+        keeps the common path to one or two requests.
+        """
+        robots = await self.robots_sites(slug, shard)
+        if robots:
+            self.stats.robots_sites += len(robots)
+            best = await self._best_of(slug, shard, robots[:MAX_ROBOTS_SITES])
+            if best is not None:
+                self.stats.robots_resolved += 1
+                return best
+        for site in site_candidates(slug)[: self._max_site_probes]:
+            _, verdict, _ = await self.probe(slug, shard, site)
+            if verdict == "live":
+                self.stats.template_resolved += 1
+                return site, await self.harvest_facets(slug, shard, site)
+        return None
+
     def persist_tenant(
         self, slug: str, shard: str, site: str | None, status: str, facet_counts: dict[str, Any] | None = None
     ) -> None:
@@ -285,17 +399,16 @@ class WorkdayOracle:
             if verdict == "unknown":
                 continue
             if verdict == "site_unknown":
-                for site in site_candidates(slug)[: self._max_site_probes]:
-                    _, site_verdict, _ = await self.probe(slug, shard, site)
-                    if site_verdict == "live":
-                        harvested = await self.harvest_facets(slug, shard, site)
-                        self.persist_tenant(slug, shard, site, "live", harvested)
-                        return ResolvedTenant(
-                            host=host_for(slug, shard), tenant=slug, site=site, shard=shard,
-                            status="live", facet_counts=harvested,
-                        )
-                self.persist_tenant(slug, shard, None, "site_unknown")
-                return None
+                resolved = await self._resolve_site(slug, shard)
+                if resolved is None:
+                    self.persist_tenant(slug, shard, None, "site_unknown")
+                    return None
+                site, harvested = resolved
+                self.persist_tenant(slug, shard, site, "live", harvested)
+                return ResolvedTenant(
+                    host=host_for(slug, shard), tenant=slug, site=site, shard=shard,
+                    status="live", facet_counts=harvested,
+                )
             harvested = await self.harvest_facets(slug, shard, "External")
             self.persist_tenant(slug, shard, "External", "live", harvested)
             return ResolvedTenant(

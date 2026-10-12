@@ -198,6 +198,11 @@ source poll -> postings -> title_gate/visa -> matches -> resume -> resumes
 - **Pacing and concurrency.** Per-host politeness (1-2 concurrent, jitter), per-identity daily
   caps, per-tenant `tenant_concurrency_cap` (forced to 1 while no proxy pool exists), and a
   global politeness budget.
+- **Discovery preflight, cheapest first.** Tenant discovery is ordered by cost: a DNS-only shard
+  sweep (`shard_sweep` over `wdN` candidates), then a single `/robots.txt` fetch per candidate,
+  which publishes the tenant's exact site slugs - so the oracle's brute-force slug probes are a
+  fallback rather than the first move - and every verdict is cached in `tenant_probes`, making
+  re-runs nearly free (`plan-workday.md` 6.2/6.5).
 - **Budget enforcement.** Hard per-run and per-day USD caps (`Settings`) checked around every
   LLM call; `cost.py` reads DeepSeek prompt-cache counters. Balance is small — respect the caps.
 - **Failure model.** A `park` (manual intervention needed) is a first-class outcome, not an

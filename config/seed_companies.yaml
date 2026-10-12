@@ -76,3 +76,292 @@ companies:
     slugs: [dell, delltechnologies]
   - name: Equinix
     slugs: [equinix]
+  # --- second wave (G1-W1 tenant gap): names known to run Workday boards on the wdN shards.
+  - name: Airbnb
+    slugs: [airbnb]
+  - name: Uber
+    slugs: [uber]
+  - name: Zoom
+    slugs: [zoom]
+  - name: Snap
+    slugs: [snap, snapchat]
+  - name: Pinterest
+    slugs: [pinterest]
+  - name: Twilio
+    slugs: [twilio]
+  - name: Atlassian
+    slugs: [atlassian]
+  - name: Palo Alto Networks
+    slugs: [paloaltonetworks]
+  - name: Fortinet
+    slugs: [fortinet]
+  - name: CrowdStrike
+    slugs: [crowdstrike]
+  - name: Zscaler
+    slugs: [zscaler]
+  - name: Okta
+    slugs: [okta]
+  - name: Datadog
+    slugs: [datadog]
+  - name: Snowflake
+    slugs: [snowflake, snowflakedb]
+  - name: Databricks
+    slugs: [databricks]
+  - name: Cloudflare
+    slugs: [cloudflare]
+  - name: Splunk
+    slugs: [splunk]
+  - name: Intuit
+    slugs: [intuit]
+  - name: GoDaddy
+    slugs: [godaddy]
+  - name: Zendesk
+    slugs: [zendesk]
+  - name: Box
+    slugs: [box, boxinc]
+  - name: Dropbox
+    slugs: [dropbox]
+  - name: MongoDB
+    slugs: [mongodb]
+  - name: Elastic
+    slugs: [elastic]
+  - name: NetApp
+    slugs: [netapp]
+  - name: AMD
+    slugs: [amd]
+  - name: Qualcomm
+    slugs: [qualcomm]
+  - name: Arm
+    slugs: [arm]
+  - name: Texas Instruments
+    slugs: [texasinstruments]
+  - name: Applied Materials
+    slugs: [appliedmaterials]
+  - name: Marvell
+    slugs: [marvell]
+  - name: NXP Semiconductors
+    slugs: [nxp]
+  - name: Infineon
+    slugs: [infineon]
+  - name: STMicroelectronics
+    slugs: [stmicroelectronics]
+  - name: Western Digital
+    slugs: [westerndigital]
+  - name: Micron
+    slugs: [micron]
+  - name: BlackRock
+    slugs: [blackrock]
+  - name: Blackstone
+    slugs: [blackstone]
+  - name: Vanguard
+    slugs: [vanguard]
+  - name: Charles Schwab
+    slugs: [schwab]
+  - name: Northern Trust
+    slugs: [northerntrust]
+  - name: Invesco
+    slugs: [invesco]
+  - name: Franklin Templeton
+    slugs: [franklintempleton]
+  - name: Schroders
+    slugs: [schroders]
+  - name: abrdn
+    slugs: [abrdn]
+  - name: Legal & General
+    slugs: [legalandgeneral]
+  - name: Aviva
+    slugs: [aviva]
+  - name: Prudential
+    slugs: [prudential]
+  - name: Santander
+    slugs: [santander]
+  - name: ING
+    slugs: [ing]
+  - name: Rabobank
+    slugs: [rabobank]
+  - name: ABN AMRO
+    slugs: [abnamro]
+  - name: Nordea
+    slugs: [nordea]
+  - name: Swiss Re
+    slugs: [swissre]
+  - name: Zurich Insurance
+    slugs: [zurich]
+  - name: AIG
+    slugs: [aig]
+  - name: Chubb
+    slugs: [chubb]
+  - name: Allianz
+    slugs: [allianz]
+  - name: BNP Paribas
+    slugs: [bnpparibas]
+  - name: Societe Generale
+    slugs: [societegenerale]
+  - name: Credit Agricole
+    slugs: [creditagricole]
+  - name: LSEG
+    slugs: [lseg]
+  - name: Nasdaq
+    slugs: [nasdaq]
+  - name: CME Group
+    slugs: [cmegroup]
+  - name: Interactive Brokers
+    slugs: [interactivebrokers]
+  - name: Tradeweb
+    slugs: [tradeweb]
+  - name: MarketAxess
+    slugs: [marketaxess]
+  - name: Broadridge
+    slugs: [broadridge]
+  - name: FIS
+    slugs: [fis, fisglobal]
+  - name: Fiserv
+    slugs: [fiserv]
+  - name: FICO
+    slugs: [fico]
+  - name: Experian
+    slugs: [experian]
+  - name: Equifax
+    slugs: [equifax]
+  - name: TransUnion
+    slugs: [transunion]
+  - name: Moodys
+    slugs: [moodys]
+  - name: S&P Global
+    slugs: [spglobal]
+  - name: MSCI
+    slugs: [msci]
+  - name: American Express
+    slugs: [americanexpress, amex]
+  - name: Capital One
+    slugs: [capitalone]
+  - name: Synchrony
+    slugs: [synchrony]
+  - name: Truist
+    slugs: [truist]
+  - name: PNC Financial
+    slugs: [pnc]
+  - name: US Bank
+    slugs: [usbank]
+  - name: Fifth Third Bank
+    slugs: [fifththird]
+  - name: Western Union
+    slugs: [westernunion]
+  - name: Klarna
+    slugs: [klarna]
+  - name: Adyen
+    slugs: [adyen]
+  - name: Wise
+    slugs: [wise, transferwise]
+  - name: Monzo
+    slugs: [monzo]
+  - name: Starling Bank
+    slugs: [starlingbank, starling]
+  - name: Tide
+    slugs: [tide]
+  - name: Checkout.com
+    slugs: [checkout]
+  - name: GoCardless
+    slugs: [gocardless]
+  - name: ThoughtMachine
+    slugs: [thoughtmachine]
+  - name: Form3
+    slugs: [form3]
+  - name: Quantexa
+    slugs: [quantexa]
+  - name: Featurespace
+    slugs: [featurespace]
+  - name: Zopa
+    slugs: [zopa]
+  - name: Funding Circle
+    slugs: [fundingcircle]
+  - name: Plaid
+    slugs: [plaid]
+  - name: Chime
+    slugs: [chime]
+  - name: Marqeta
+    slugs: [marqeta]
+  - name: Airwallex
+    slugs: [airwallex]
+  - name: Trade Republic
+    slugs: [traderepublic]
+  - name: Robinhood
+    slugs: [robinhood]
+  - name: Coinbase
+    slugs: [coinbase]
+  - name: Affirm
+    slugs: [affirm]
+  - name: Nubank
+    slugs: [nubank]
+  - name: eToro
+    slugs: [etoro]
+  - name: CMC Markets
+    slugs: [cmcmarkets]
+  - name: Mollie
+    slugs: [mollie]
+  - name: SumUp
+    slugs: [sumup]
+  - name: Worldpay
+    slugs: [worldpay]
+  - name: Payoneer
+    slugs: [payoneer]
+  - name: Remitly
+    slugs: [remitly]
+  - name: Vodafone
+    slugs: [vodafone]
+  - name: BT Group
+    slugs: [bt]
+  - name: Sky
+    slugs: [sky]
+  - name: Deliveroo
+    slugs: [deliveroo]
+  - name: Just Eat Takeaway
+    slugs: [justeattakeaway]
+  - name: Ocado
+    slugs: [ocado]
+  - name: Dyson
+    slugs: [dyson]
+  - name: Rolls-Royce
+    slugs: [rollsroyce]
+  - name: Jaguar Land Rover
+    slugs: [jaguarlandrover]
+  - name: Siemens
+    slugs: [siemens]
+  - name: Philips
+    slugs: [philips]
+  - name: Schneider Electric
+    slugs: [schneiderelectric]
+  - name: Unilever
+    slugs: [unilever]
+  - name: Diageo
+    slugs: [diageo]
+  - name: GSK
+    slugs: [gsk]
+  - name: AstraZeneca
+    slugs: [astrazeneca]
+  - name: Pfizer
+    slugs: [pfizer]
+  - name: Novartis
+    slugs: [novartis]
+  - name: Roche
+    slugs: [roche]
+  - name: Sanofi
+    slugs: [sanofi]
+  - name: Kerry Group
+    slugs: [kerrygroup]
+  - name: Ryanair
+    slugs: [ryanair]
+  - name: ICON
+    slugs: [iconplc, icon]
+  - name: Medtronic
+    slugs: [medtronic]
+  - name: Boston Scientific
+    slugs: [bostonscientific]
+  - name: Accenture
+    slugs: [accenture]
+  - name: Capgemini
+    slugs: [capgemini]
+  - name: Infosys
+    slugs: [infosys]
+  - name: Cognizant
+    slugs: [cognizant]

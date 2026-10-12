@@ -14,9 +14,19 @@ import pytest
 from jobagent import db
 from jobagent.config import load_criteria, load_seed_companies, load_sources
 from jobagent.discover.ats import GreenhouseSource, emails_in, strip_html
+from jobagent.discover.base import TenantCandidate
 from jobagent.discover.store import jd_hash, mark_inactive, upsert_postings, utcnow
 from jobagent.discover.workday_cxs import TenantRef, parse_job_posting, parse_posted_on
-from jobagent.discover.workday_tenants import classify_probe, pascal_cases, site_candidates
+from jobagent.discover.workday_tenants import (
+    SHARD_PROBE_LABEL,
+    WorkdayOracle,
+    classify_probe,
+    facet_size,
+    parse_robots_sites,
+    pascal_cases,
+    shard_sweep,
+    site_candidates,
+)
 from jobagent.models import Posting
 from jobagent.net import Resp
 
@@ -35,6 +45,9 @@ class FakeClient:
                 text = payload if isinstance(payload, str) else json.dumps(payload)
                 return Resp(status=status, url=url, text=text)
         return Resp(status=404, url=url, text="{}")
+
+    async def get(self, url: str, **kw: object) -> Resp:
+        return self._respond(url)
 
     async def get_json(self, url: str, **kw: object) -> Resp:
         return self._respond(url)
@@ -91,6 +104,158 @@ def test_site_candidates_cover_casing_and_separators() -> None:
 def test_pascal_cases() -> None:
     assert pascal_cases("citi") == ["Citi", "CITI"]
     assert pascal_cases("a-b") == ["Ab", "AB"]
+
+
+# --- robots.txt site-slug oracle ---------------------------------------------
+#
+# Verbatim robots.txt bodies captured live at G1; see plan-workday.md section 6.5.
+
+NVIDIA_ROBOTS = (
+    "Sitemap: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/siteMap.xml\n"
+    "\nUser-agent: *\n"
+    "Allow: /NVIDIAExternalCareerSite/\n"
+    "Disallow: /NVIDIAExternalCareerSiteResearch/\n"
+    "Disallow: /talentcommunity/\n"
+    "Disallow: /refreshFacet/\n"
+)
+
+CITI_ROBOTS = (
+    "\nUser-agent: *\n"
+    "Disallow: /2/\n"
+    "Disallow: /Citi_Early_Careers_Events_Site/\n"
+    "Disallow: /refreshFacet/\n"
+)
+
+S21 = '{"errorCode":"S21","message":"not found: Job_Posting_Site_ID=External"}'
+
+
+def test_parse_robots_prefers_sitemap_then_dedupes() -> None:
+    slugs = parse_robots_sites(NVIDIA_ROBOTS)
+    assert slugs[0] == "NVIDIAExternalCareerSite"
+    assert slugs.count("NVIDIAExternalCareerSite") == 1
+    assert "NVIDIAExternalCareerSiteResearch" in slugs
+
+
+def test_parse_robots_reads_disallow_only_tenants() -> None:
+    """`citi` publishes no Sitemap and no Allow rule - its public site slug is literally `2`."""
+    assert parse_robots_sites(CITI_ROBOTS)[:1] == ["2"]
+
+
+def test_parse_robots_tolerates_junk() -> None:
+    assert parse_robots_sites(None) == []
+    assert parse_robots_sites("") == []
+    assert parse_robots_sites("User-agent: *\nDisallow:\n") == []
+
+
+def test_facet_size_ignores_the_2000_total_cap() -> None:
+    assert facet_size({"total_reported": 2000, "sizes": {"workerSubType": 5123}}) == 5123
+    assert facet_size({"total_reported": 40}) == 40
+    assert facet_size({}) == 0
+
+
+@pytest.mark.asyncio
+async def test_oracle_resolves_site_from_robots(conn) -> None:
+    """`External` 404s (S21) but robots.txt names the real slug - that must become a live tenant."""
+    client = FakeClient(
+        {
+            "/robots.txt": (200, NVIDIA_ROBOTS),
+            "/nvidia/External/jobs": (404, S21),
+            "/nvidia/NVIDIAExternalCareerSite/jobs": (200, {"total": 120, "facets": []}),
+        }
+    )
+    oracle = WorkdayOracle(client, conn, shards=["wd5"], max_site_probes=2)
+    candidate = TenantCandidate(
+        host="nvidia.wd5.myworkdayjobs.com", tenant="nvidia", site=None,
+        source="seed", evidence={"shards": ["wd5"]},
+    )
+    resolved = await oracle.resolve(candidate)
+
+    assert resolved is not None
+    assert (resolved.site, resolved.shard, resolved.status) == ("NVIDIAExternalCareerSite", "wd5", "live")
+    assert resolved.facet_counts["total_reported"] == 120
+    row = conn.execute("SELECT site, status FROM tenants WHERE tenant='nvidia'").fetchone()
+    assert (row["site"], row["status"]) == ("NVIDIAExternalCareerSite", "live")
+    assert oracle.stats.robots_resolved == 1
+    assert oracle.stats.template_resolved == 0
+
+
+@pytest.mark.asyncio
+async def test_oracle_ranks_multiple_robot_boards_by_size(conn) -> None:
+    """`citi` publishes `/2/` (the corporate board) and an early-careers board: the big one wins."""
+    client = FakeClient(
+        {
+            "/robots.txt": (200, CITI_ROBOTS),
+            "/citi/External/jobs": (404, S21),
+            "/citi/2/jobs": (200, {"total": 2000, "facets": []}),
+            "/citi/Citi_Early_Careers_Events_Site/jobs": (200, {"total": 24, "facets": []}),
+        }
+    )
+    oracle = WorkdayOracle(client, conn, shards=["wd5"], max_site_probes=2)
+    candidate = TenantCandidate(
+        host="citi.wd5.myworkdayjobs.com", tenant="citi", site=None,
+        source="seed", evidence={"shards": ["wd5"]},
+    )
+    resolved = await oracle.resolve(candidate)
+
+    assert resolved is not None
+    assert resolved.site == "2"
+    assert resolved.facet_counts["total_reported"] == 2000
+
+
+@pytest.mark.asyncio
+async def test_oracle_falls_back_to_templates_when_robots_is_useless(conn) -> None:
+    """No robots.txt, no robots slugs -> the generated templates still resolve the site."""
+    client = FakeClient(
+        {
+            "/robots.txt": (422, "{}"),
+            "/acme/External/jobs": (404, S21),
+            "/acme/Acme_Careers/jobs": (200, {"total": 7, "facets": []}),
+        }
+    )
+    oracle = WorkdayOracle(client, conn, shards=["wd1"], max_site_probes=40)
+    candidate = TenantCandidate(
+        host="acme.wd1.myworkdayjobs.com", tenant="acme", site=None,
+        source="seed", evidence={"shards": ["wd1"]},
+    )
+    resolved = await oracle.resolve(candidate)
+
+    assert resolved is not None
+    assert resolved.site == "Acme_Careers"
+    assert oracle.stats.template_resolved == 1
+    assert oracle.stats.robots_resolved == 0
+
+# --- shard sweep -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_shard_sweep_probes_a_bogus_label_not_the_apex(monkeypatch) -> None:
+    """A shard exists iff an arbitrary label under it resolves (verified at G1).
+
+    The apex is unusable in both directions: `wd12`/`wd501` are live with no apex record, and
+    `wd11` has an apex record while not being a shard. An apex-based sweep therefore dropped - and
+    invented - shards, which is why this test pins the probed host.
+    """
+    import socket as socket_module
+
+    seen: list[str] = []
+
+    def fake_getaddrinfo(host: str, port: int) -> list[object]:
+        seen.append(host)
+        if host.startswith(f"{SHARD_PROBE_LABEL}.wd5."):
+            return [object()]
+        raise socket_module.gaierror(11001, "getaddrinfo failed")
+
+    monkeypatch.setattr(socket_module, "getaddrinfo", fake_getaddrinfo)
+    result = await shard_sweep(["wd5", "wd11"])
+
+    assert result == {"wd5": True, "wd11": False}
+    assert set(seen) == {
+        f"{SHARD_PROBE_LABEL}.wd5.myworkdayjobs.com",
+        f"{SHARD_PROBE_LABEL}.wd11.myworkdayjobs.com",
+    }
+    assert not any(host.startswith(("wd5.", "wd11.")) for host in seen)
+
+
 
 
 # --- workday search mapping -------------------------------------------------

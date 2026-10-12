@@ -19,18 +19,23 @@ actually gets responses.
 
 ## Current state
 
-`PS-5.4` — **G0 met**, **G1 partial**, on the **native Windows host**.
+`PS-5.4` — **G0 met**, **G1 met** except one unmeasured clause, on the **native Windows host**.
 
 - **Host**: Windows 11, native — the agent and Chromium run natively, and Ollama too once the WSL
   unit is retired so it can take `localhost:11434`. WSL is no longer the platform of record.
 - **G0 met 2026-10-11** — `uv`/Python 3.13 scaffold, typed config, SQLite schema v1, `doctor`,
   criteria title gate + test battery, re-verified on the Windows host (`plan-general.md` §11).
   `doctor` exits 0 (1 WARN: `AGENT_TOKEN` unset by design); `pytest -q` is **49 passed**.
-- **G1 partial 2026-10-11** — hunt layer + Workday `cxs` discovery: **3775 postings stored,
-  0 duplicate `(source, source_id)` rows**, Workday postings carrying a req id **320/320**.
-  **Gap: 8 live tenants vs the >= 20 target** and site-slug resolution **8/16 = 50% vs >= 80%**,
-  so gate **H1a is not passed** (`plan-general.md` §12 carries the mitigation).
-- Next action: **close the G1 tenant gap**, then **G2** (rank + tailor).
+- **G1 met 2026-10-12, except one unmeasured clause** — hunt layer + Workday `cxs` discovery:
+  **71 live tenants / 72 known** (site-slug resolution **71/72 = 98.6%**, **zero manual entries**,
+  14/21 shards live) plus **4021 Workday postings** from them, req id **4021/4021**, and
+  **0 duplicate `(source, source_id)` rows** across all sources. Gate **H1a passed**.
+  The 2026-10-11 reading (**8 live tenants, 50% slug resolution**) was closed by two discovery
+  fixes: `GET /robots.txt` publishes a tenant's **exact** site slugs, and the shard sweep had been
+  probing the bare `{shard}` apex, which hides more than half of the live shards
+  (`plan-workday.md` §6.2, §6.5).
+  **Not met:** the "<= 60 min after posting" freshness target is **unmeasured** — no scheduler until G6.
+- Next action: **G2** (rank + tailor).
 
 
 ## Rules of the doc set

@@ -351,9 +351,19 @@ class TenantSource(Protocol):
     async def yield_candidates(self, criteria: Criteria) -> AsyncIterator[TenantCandidate]: ...
 ```
 
-Implementations: `WorkdayTenantDiscovery` (inverted aggregator harvest — default), and later
-`BruteForceBreadthSource`, `CrtShCustomDomainSource`. Adding one = one class + one config entry.
+Implementations: `SeedTenantSource` (`discover/workday_tenants.py`, **implemented, G1-W1**) yields
+the unverified slug guesses from `config/seed_companies.yaml` with the live shard set as
+`evidence["shards"]`. `WorkdayTenantDiscovery` (inverted aggregator harvest — the plan's default),
+`BruteForceBreadthSource` and `CrtShCustomDomainSource` are still **planned**: adding one = one
+class + one config entry.
 Verification is always via the `cxs` oracle (§8.2); sources may run in parallel with weights.
+
+Shard set — `shard_sweep(shards: Iterable[str] = SHARD_CANDIDATES) -> dict[str, bool]`
+(**implemented, G1-W1**): DNS only, no HTTP. `True` iff
+`{SHARD_PROBE_LABEL}.{shard}.myworkdayjobs.com` resolves, because only a live shard's wildcard
+record answers for an arbitrary label (see the DNS note in §8.2). `SHARD_CANDIDATES` is the `wdN`
+candidate list — **data, not criteria** (`AGENTS.md` 3.2) — and the live set is cached in the
+`shards` table.
 
 ### 7.3 `ApplyChannel` — one per submission channel *(planned, G3/G5)*
 
@@ -468,11 +478,34 @@ Oracle for tenant/site validity (one `limit:1` probe per `(slug, shard, site_gue
 | `422` | `{"errorCode": "HTTP_422", "message": ""}` | no such tenant | negative-cache 30 days |
 
 Drift canary signal: `errorCaseId` is unique per request; alert if the error envelope changes.
-DNS note: `*.wdN.myworkdayjobs.com` resolves for **any** slug (browsing DNS is not a validity
-test) - existence is only provable via `cxs`. A **bare** `GET /` returns `406` with an empty body
-**even under `curl_cffi impersonate="chrome"`**; `GET /en-US` returns `404`; only
+
+DNS note: `*.wdN.myworkdayjobs.com` resolves for **any** label, so DNS can never prove that a
+*tenant* exists - only `cxs` does. The **shard** test is the wildcard label
+(`wd-shard-probe.{shard}.myworkdayjobs.com`, `shard_sweep` in §7.2): a live shard answers for an
+arbitrary label. The bare **apex** `{shard}.myworkdayjobs.com` is **not** a signal and must not be
+used - live `wd12`/`wd103`/`wd501` have no apex record, while dead `wd11` has one (34.213.x) and
+`wd1`'s apex resolves to the local sinkhole `127.0.0.1`. A bare `GET /` returns `406` with an empty
+body **even under `curl_cffi impersonate="chrome"`**; `GET /en-US` returns `404`; only
 `GET /en-US/{site}` returns `200` - and it echoes back the site slug, so it confirms a slug but
 cannot discover one (`plan-workday.md` 6.5).
+
+**Site-slug discovery: `GET /robots.txt` (verified 2026-10-12; used from G1-W1).** The tenant host
+serves `/robots.txt` (impersonated `curl_cffi`; it answers even where bare `/` is `406`) and the
+body **names the published site slugs exactly**, so no guessing is needed:
+
+```text
+GET https://{tenant}.{shard}.myworkdayjobs.com/robots.txt     -> 200, text/plain
+Sitemap: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/siteMap.xml
+Allow: /NVIDIAExternalCareerSite/
+Disallow: /2/           <- `citi` publishes rules only; its site slug is literally `2`
+```
+
+`parse_robots_sites(body) -> list[str]` extracts slugs from sitemap lines first, then from
+`Allow:`/`Disallow:` rules, deduped and in file order; rules are deliberately unfiltered because the
+oracle verifies every candidate, so a non-site path segment simply fails its probe. `facet_size()`
+sizes a board (`max(total_reported, sum(facet counts))`, because `total` caps at 2000) so a
+multi-site tenant keeps its **largest** board; `MAX_ROBOTS_SITES` (12) bounds the fan-out. The
+acquisition order and measured yield are in `plan-workday.md` 6.5.
 
 Job detail / apply-flow endpoints: **[?] still to verify from the `G0-W` HAR**
 (`plan-general.md` §14). `WorkdayCxsDiscovery.fetch_detail()` exists but is **unverified and
@@ -518,10 +551,12 @@ the `postings` columns). It exists because the pinned protocols referenced those
 owning module - **a recorded deviation** (see the module docstring).
 
 `discover/workday_tenants.py` owns the oracle: `classify_probe(status, body) -> (verdict,
-error_code)` (pure), `shard_sweep()`, `site_candidates(slug)`, `SeedTenantSource`, and
-`WorkdayOracle` (`probe`, `harvest_facets`, `persist_tenant`, `resolve`, `run`). Every probe is
-recorded in `tenant_probes`, so re-runs are nearly free (`run 2` at G1 was 98 probes and 300 cache
-hits).
+error_code)` (pure), `shard_sweep()`, `parse_robots_sites(body)` + `facet_size(harvested)` (the
+`G1` site-slug path, §8.2), `site_candidates(slug)`, `SeedTenantSource`, and `WorkdayOracle` (`probe`,
+`harvest_facets`, `persist_tenant`, `robots_sites`, `resolve`, `run`). Every probe is recorded in
+`tenant_probes`, so re-runs are nearly free (`run 2` at G1 was 98 probes and 300 cache hits).
+`OracleStats` reports `robots_sites` / `robots_resolved` / `template_resolved` so the two
+site-slug strategies stay separately measurable.
 
 ## 9. Workday apply state machine (planned, G5-W2)
 
